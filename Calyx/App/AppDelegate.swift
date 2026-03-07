@@ -105,7 +105,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Window Management
 
     @objc func createNewWindow() {
-        let windowSession = WindowSession()
+        let initialTab = Tab()
+        let windowSession = WindowSession(initialTab: initialTab)
         appSession.addWindow(windowSession)
 
         let wc = CalyxWindowController(windowSession: windowSession)
@@ -114,9 +115,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func removeWindowController(_ controller: CalyxWindowController) {
-        if let sessionID = controller.windowSessionID {
-            appSession.removeWindow(id: sessionID)
-        }
+        appSession.removeWindow(id: controller.windowSession.id)
         windowControllers.removeAll { $0 === controller }
     }
 
@@ -158,8 +157,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         fileMenuItem.submenu = fileMenu
 
         fileMenu.addItem(withTitle: "New Window", action: #selector(createNewWindow), keyEquivalent: "n")
+        fileMenu.addItem(withTitle: "New Tab", action: #selector(CalyxWindowController.newTab(_:)), keyEquivalent: "t")
         fileMenu.addItem(.separator())
-        fileMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        fileMenu.addItem(withTitle: "Close Tab", action: #selector(CalyxWindowController.closeTab(_:)), keyEquivalent: "w")
 
         // Edit menu
         let editMenuItem = NSMenuItem()
@@ -180,6 +180,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let viewMenu = NSMenu(title: "View")
         viewMenuItem.submenu = viewMenu
 
+        let toggleSidebarItem = NSMenuItem(
+            title: "Toggle Sidebar",
+            action: #selector(CalyxWindowController.toggleSidebar),
+            keyEquivalent: "s"
+        )
+        toggleSidebarItem.keyEquivalentModifierMask = [.command, .option]
+        viewMenu.addItem(toggleSidebarItem)
+
         let fullScreenItem = NSMenuItem(
             title: "Toggle Full Screen",
             action: #selector(NSWindow.toggleFullScreen(_:)),
@@ -197,6 +205,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+
+        // Tab navigation via menu
+        let nextTabItem = NSMenuItem(title: "Select Next Tab", action: #selector(CalyxWindowController.selectNextTab(_:)), keyEquivalent: "]")
+        nextTabItem.keyEquivalentModifierMask = [.command, .shift]
+        windowMenu.addItem(nextTabItem)
+
+        let prevTabItem = NSMenuItem(title: "Select Previous Tab", action: #selector(CalyxWindowController.selectPreviousTab(_:)), keyEquivalent: "[")
+        prevTabItem.keyEquivalentModifierMask = [.command, .shift]
+        windowMenu.addItem(prevTabItem)
+
+        windowMenu.addItem(.separator())
+
+        // Cmd+1-9 tab selection
+        for i in 1...9 {
+            let selector = Selector("selectTab\(i):")
+            let item = NSMenuItem(title: "Select Tab \(i)", action: selector, keyEquivalent: "\(i)")
+            windowMenu.addItem(item)
+        }
+
         windowMenu.addItem(.separator())
         windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
 

@@ -100,7 +100,7 @@ extension TabGroup {
         TabGroupSnapshot(
             id: id,
             name: name,
-            color: color,
+            color: color.rawValue,
             tabs: tabs.map { $0.snapshot() },
             activeTabID: activeTabID
         )

@@ -9,7 +9,8 @@ import Foundation
 class TabGroup: Identifiable {
     let id: UUID
     var name: String
-    var color: String?
+    var color: TabGroupColor
+    var isCollapsed: Bool
     var tabs: [Tab]
     var activeTabID: UUID?
 
@@ -20,13 +21,15 @@ class TabGroup: Identifiable {
     init(
         id: UUID = UUID(),
         name: String = "Default",
-        color: String? = nil,
+        color: TabGroupColor = .blue,
+        isCollapsed: Bool = false,
         tabs: [Tab] = [],
         activeTabID: UUID? = nil
     ) {
         self.id = id
         self.name = name
         self.color = color
+        self.isCollapsed = isCollapsed
         self.tabs = tabs
         self.activeTabID = activeTabID
     }

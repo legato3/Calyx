@@ -23,7 +23,7 @@ class CalyxWindow: NSWindow {
         isReleasedWhenClosed = false
 
         styleMask.insert(.fullSizeContentView)
-        tabbingMode = .preferred
+        tabbingMode = .disallowed
     }
 
     override var canBecomeKey: Bool { true }

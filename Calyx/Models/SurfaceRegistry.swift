@@ -112,4 +112,23 @@ final class SurfaceRegistry {
     func id(for surfaceView: SurfaceView) -> UUID? {
         entries.first(where: { $0.value.view === surfaceView })?.key
     }
+
+    // MARK: - Tab Lifecycle
+
+    func pauseAll() {
+        for id in allIDs {
+            entries[id]?.controller.setOcclusion(true)
+            entries[id]?.controller.setFocus(false)
+        }
+    }
+
+    func resumeAll() {
+        for id in allIDs {
+            entries[id]?.controller.setOcclusion(false)
+        }
+    }
+
+    func contains(_ id: UUID) -> Bool {
+        entries[id] != nil
+    }
 }

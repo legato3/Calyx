@@ -528,4 +528,228 @@ final class SessionModelTests: XCTestCase {
         XCTAssertTrue(appSession.windows.isEmpty,
                       "Windows array should be empty after removing all windows")
     }
+
+    // ==================== Phase 3: WindowSession removeTab ====================
+
+    func test_removeActiveTab_switchesToNext() {
+        // Arrange — group with [A, B, C], active = A
+        let tabA = makeTab(title: "A")
+        let tabB = makeTab(title: "B")
+        let tabC = makeTab(title: "C")
+        let group = makeGroup(tabs: [tabA, tabB, tabC], activeTabID: tabA.id)
+        let session = WindowSession(groups: [group], activeGroupID: group.id)
+
+        // Act
+        let result = session.removeTab(id: tabA.id, fromGroup: group.id)
+
+        // Assert
+        if case .switchedTab(let gid, let tid) = result {
+            XCTAssertEqual(gid, group.id)
+            XCTAssertEqual(tid, tabB.id, "Should switch to next tab (B)")
+        } else {
+            XCTFail("Expected .switchedTab, got \(result)")
+        }
+        XCTAssertEqual(group.tabs.count, 2)
+    }
+
+    func test_removeLastTab_removesGroup() {
+        // Arrange — group with single tab
+        let tab = makeTab()
+        let group1 = makeGroup(name: "G1", tabs: [tab], activeTabID: tab.id)
+        let tab2 = makeTab()
+        let group2 = makeGroup(name: "G2", tabs: [tab2], activeTabID: tab2.id)
+        let session = WindowSession(groups: [group1, group2], activeGroupID: group1.id)
+
+        // Act — remove only tab from group1
+        let result = session.removeTab(id: tab.id, fromGroup: group1.id)
+
+        // Assert
+        if case .switchedGroup(let gid, let tid) = result {
+            XCTAssertEqual(gid, group2.id)
+            XCTAssertEqual(tid, tab2.id, "Should switch to group2's active tab")
+        } else {
+            XCTFail("Expected .switchedGroup, got \(result)")
+        }
+        XCTAssertEqual(session.groups.count, 1, "Group1 should be removed")
+    }
+
+    func test_removeLastGroup_returnsWindowShouldClose() {
+        // Arrange — single group with single tab
+        let tab = makeTab()
+        let group = makeGroup(tabs: [tab], activeTabID: tab.id)
+        let session = WindowSession(groups: [group], activeGroupID: group.id)
+
+        // Act
+        let result = session.removeTab(id: tab.id, fromGroup: group.id)
+
+        // Assert
+        if case .windowShouldClose = result {
+            // Expected
+        } else {
+            XCTFail("Expected .windowShouldClose, got \(result)")
+        }
+        XCTAssertTrue(session.groups.isEmpty)
+    }
+
+    func test_switchToInvalidTab_noOp() {
+        // Arrange
+        let tab = makeTab()
+        let group = makeGroup(tabs: [tab], activeTabID: tab.id)
+        let session = WindowSession(groups: [group], activeGroupID: group.id)
+
+        // Act — try to select a tab by index that doesn't exist
+        session.selectTab(at: 99)
+
+        // Assert — nothing changed
+        XCTAssertEqual(group.activeTabID, tab.id)
+    }
+
+    func test_switchToInvalidGroup_noOp() {
+        // Arrange
+        let tab = makeTab()
+        let group = makeGroup(tabs: [tab], activeTabID: tab.id)
+        let session = WindowSession(groups: [group], activeGroupID: group.id)
+        let originalGroupID = session.activeGroupID
+
+        // Act — set active to non-existent group
+        session.activeGroupID = UUID()
+
+        // Assert — activeGroup should return nil but activeGroupID changed
+        XCTAssertNil(session.activeGroup)
+        // Restore
+        session.activeGroupID = originalGroupID
+        XCTAssertNotNil(session.activeGroup)
+    }
+
+    func test_invariant_alwaysHasActiveTab() {
+        // Arrange — session with 2 groups, 2 tabs each
+        let t1 = makeTab(title: "T1")
+        let t2 = makeTab(title: "T2")
+        let t3 = makeTab(title: "T3")
+        let t4 = makeTab(title: "T4")
+        let g1 = makeGroup(name: "G1", tabs: [t1, t2], activeTabID: t1.id)
+        let g2 = makeGroup(name: "G2", tabs: [t3, t4], activeTabID: t3.id)
+        let session = WindowSession(groups: [g1, g2], activeGroupID: g1.id)
+
+        // Act — remove tabs one by one, checking invariant
+        let r1 = session.removeTab(id: t1.id, fromGroup: g1.id)
+        if case .switchedTab(_, _) = r1 {
+            XCTAssertNotNil(session.activeGroup?.activeTab, "After removing t1, active tab should exist")
+        }
+
+        let r2 = session.removeTab(id: t2.id, fromGroup: g1.id)
+        if case .switchedGroup(_, _) = r2 {
+            XCTAssertNotNil(session.activeGroup?.activeTab, "After removing g1's last tab, active tab in g2 should exist")
+        }
+
+        let r3 = session.removeTab(id: t3.id, fromGroup: g2.id)
+        if case .switchedTab(_, _) = r3 {
+            XCTAssertNotNil(session.activeGroup?.activeTab, "After removing t3, t4 should be active")
+        }
+
+        let r4 = session.removeTab(id: t4.id, fromGroup: g2.id)
+        if case .windowShouldClose = r4 {
+            // Expected — all gone
+        } else {
+            XCTFail("Expected .windowShouldClose after removing all tabs")
+        }
+    }
+
+    // ==================== Phase 3: Tab Navigation ====================
+
+    func test_nextTab_wrapsAround() {
+        let t1 = makeTab(title: "T1")
+        let t2 = makeTab(title: "T2")
+        let group = makeGroup(tabs: [t1, t2], activeTabID: t2.id)
+        let session = WindowSession(groups: [group], activeGroupID: group.id)
+
+        session.nextTab()
+        XCTAssertEqual(group.activeTabID, t1.id, "nextTab from last should wrap to first")
+    }
+
+    func test_previousTab_wrapsAround() {
+        let t1 = makeTab(title: "T1")
+        let t2 = makeTab(title: "T2")
+        let group = makeGroup(tabs: [t1, t2], activeTabID: t1.id)
+        let session = WindowSession(groups: [group], activeGroupID: group.id)
+
+        session.previousTab()
+        XCTAssertEqual(group.activeTabID, t2.id, "previousTab from first should wrap to last")
+    }
+
+    func test_nextGroup_wrapsAround() {
+        let t1 = makeTab()
+        let t2 = makeTab()
+        let g1 = makeGroup(name: "G1", tabs: [t1], activeTabID: t1.id)
+        let g2 = makeGroup(name: "G2", tabs: [t2], activeTabID: t2.id)
+        let session = WindowSession(groups: [g1, g2], activeGroupID: g2.id)
+
+        session.nextGroup()
+        XCTAssertEqual(session.activeGroupID, g1.id, "nextGroup from last should wrap to first")
+    }
+
+    func test_previousGroup_wrapsAround() {
+        let t1 = makeTab()
+        let t2 = makeTab()
+        let g1 = makeGroup(name: "G1", tabs: [t1], activeTabID: t1.id)
+        let g2 = makeGroup(name: "G2", tabs: [t2], activeTabID: t2.id)
+        let session = WindowSession(groups: [g1, g2], activeGroupID: g1.id)
+
+        session.previousGroup()
+        XCTAssertEqual(session.activeGroupID, g2.id, "previousGroup from first should wrap to last")
+    }
+
+    func test_selectTab_validIndex() {
+        let t1 = makeTab(title: "T1")
+        let t2 = makeTab(title: "T2")
+        let t3 = makeTab(title: "T3")
+        let group = makeGroup(tabs: [t1, t2, t3], activeTabID: t1.id)
+        let session = WindowSession(groups: [group], activeGroupID: group.id)
+
+        session.selectTab(at: 2)
+        XCTAssertEqual(group.activeTabID, t3.id)
+    }
+
+    // ==================== Phase 3: WindowSession convenience init ====================
+
+    func test_convenienceInit_createsDefaultGroup() {
+        let tab = makeTab()
+        let session = WindowSession(initialTab: tab)
+
+        XCTAssertEqual(session.groups.count, 1)
+        XCTAssertEqual(session.groups.first?.name, "Default")
+        XCTAssertEqual(session.groups.first?.tabs.count, 1)
+        XCTAssertEqual(session.groups.first?.activeTabID, tab.id)
+        XCTAssertEqual(session.activeGroupID, session.groups.first?.id)
+    }
+
+    // ==================== Phase 3: TabGroupColor ====================
+
+    func test_tabGroupColor_decodeLegacyString_fallsBackToBlue() throws {
+        let json = Data("\"unknown_color\"".utf8)
+        let decoded = try JSONDecoder().decode(TabGroupColor.self, from: json)
+        XCTAssertEqual(decoded, .blue, "Unknown color string should fall back to .blue")
+    }
+
+    func test_tabGroupColor_decodeValidColor_succeeds() throws {
+        let json = Data("\"red\"".utf8)
+        let decoded = try JSONDecoder().decode(TabGroupColor.self, from: json)
+        XCTAssertEqual(decoded, .red)
+    }
+
+    func test_tabGroupColor_allCasesCount() {
+        XCTAssertEqual(TabGroupColor.allCases.count, 10)
+    }
+
+    // ==================== Phase 3: TabGroup color type ====================
+
+    func test_tabGroup_defaultColor_isBlue() {
+        let group = makeGroup()
+        XCTAssertEqual(group.color, .blue)
+    }
+
+    func test_tabGroup_isCollapsed_defaultFalse() {
+        let group = makeGroup()
+        XCTAssertFalse(group.isCollapsed)
+    }
 }

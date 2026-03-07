@@ -17,18 +17,21 @@ class Tab: Identifiable {
     var pwd: String?
     var splitTree: SplitTree
     var content: TabContent
+    let registry: SurfaceRegistry
 
     init(
         id: UUID = UUID(),
         title: String = "Terminal",
         pwd: String? = nil,
         splitTree: SplitTree = SplitTree(),
-        content: TabContent = .terminal
+        content: TabContent = .terminal,
+        registry: SurfaceRegistry = SurfaceRegistry()
     ) {
         self.id = id
         self.title = title
         self.pwd = pwd
         self.splitTree = splitTree
         self.content = content
+        self.registry = registry
     }
 }
