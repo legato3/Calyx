@@ -138,7 +138,9 @@ private struct GroupHeaderBackgroundModifier: ViewModifier {
                     RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.15))
                 )
             } else {
-                content.glassEffect(.regular.tint(groupColor.color))
+                content.background(
+                    RoundedRectangle(cornerRadius: 6).fill(groupColor.color.opacity(0.2))
+                )
             }
         } else {
             content
