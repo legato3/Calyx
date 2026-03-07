@@ -17,6 +17,7 @@ class WindowSession: Identifiable {
     var groups: [TabGroup]
     var activeGroupID: UUID?
     var showSidebar: Bool
+    var showCommandPalette: Bool = false
 
     var activeGroup: TabGroup? {
         groups.first { $0.id == activeGroupID }
@@ -26,12 +27,14 @@ class WindowSession: Identifiable {
         id: UUID = UUID(),
         groups: [TabGroup] = [],
         activeGroupID: UUID? = nil,
-        showSidebar: Bool = true
+        showSidebar: Bool = true,
+        showCommandPalette: Bool = false
     ) {
         self.id = id
         self.groups = groups
         self.activeGroupID = activeGroupID
         self.showSidebar = showSidebar
+        self.showCommandPalette = showCommandPalette
     }
 
     convenience init(initialTab: Tab) {

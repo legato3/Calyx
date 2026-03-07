@@ -11,6 +11,8 @@ struct MainContentView: View {
     let activeTabs: [Tab]
     let activeTabID: UUID?
     let showSidebar: Bool
+    let showCommandPalette: Bool
+    let commandRegistry: CommandRegistry?
     let splitContainerView: SplitContainerView
 
     var onTabSelected: ((UUID) -> Void)?
@@ -19,6 +21,7 @@ struct MainContentView: View {
     var onNewGroup: (() -> Void)?
     var onCloseTab: ((UUID) -> Void)?
     var onToggleSidebar: (() -> Void)?
+    var onDismissCommandPalette: (() -> Void)?
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -42,19 +45,38 @@ struct MainContentView: View {
                     }
                 }
 
-                VStack(spacing: 0) {
-                    if activeTabs.count > 1 {
-                        TabBarContentView(
-                            tabs: activeTabs,
-                            activeTabID: activeTabID,
-                            onTabSelected: onTabSelected,
-                            onNewTab: onNewTab,
-                            onCloseTab: onCloseTab
-                        )
+                ZStack {
+                    VStack(spacing: 0) {
+                        if activeTabs.count > 1 {
+                            TabBarContentView(
+                                tabs: activeTabs,
+                                activeTabID: activeTabID,
+                                onTabSelected: onTabSelected,
+                                onNewTab: onNewTab,
+                                onCloseTab: onCloseTab
+                            )
+                        }
+
+                        TerminalContainerView(splitContainerView: splitContainerView)
+                            .opacity(0.85)
                     }
 
-                    TerminalContainerView(splitContainerView: splitContainerView)
-                        .opacity(0.85)
+                    if showCommandPalette, let commandRegistry {
+                        Color.black.opacity(0.01)
+                            .onTapGesture { onDismissCommandPalette?() }
+
+                        VStack {
+                            CommandPaletteContainerView(
+                                registry: commandRegistry,
+                                onDismiss: onDismissCommandPalette
+                            )
+                            .frame(width: 500, height: 340)
+                            .glassEffect(.regular)
+
+                            Spacer()
+                        }
+                        .padding(.top, 40)
+                    }
                 }
             }
         }

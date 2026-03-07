@@ -13,6 +13,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private(set) var windowSession: WindowSession
     private var splitContainerView: SplitContainerView?
     private var hostingView: NSHostingView<MainContentView>?
+    private let commandRegistry = CommandRegistry()
 
     // MARK: - Computed Properties
 
@@ -42,6 +43,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         window.center()
         setupShortcutManager()
+        setupCommandRegistry()
         setupUI()
         setupTerminalSurface()
         registerNotificationObservers()
@@ -80,6 +82,45 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
 
         calyxWindow.shortcutManager = manager
+    }
+
+    private func setupCommandRegistry() {
+        commandRegistry.register(Command(id: "tab.new", title: "New Tab", shortcut: "Cmd+T", category: "Tabs") { [weak self] in
+            self?.createNewTab()
+        })
+        commandRegistry.register(Command(id: "tab.close", title: "Close Tab", shortcut: "Cmd+W", category: "Tabs") { [weak self] in
+            guard let self, let tab = self.activeTab else { return }
+            self.closeTab(id: tab.id)
+        })
+        commandRegistry.register(Command(id: "tab.next", title: "Next Tab", shortcut: "Cmd+Shift+]", category: "Tabs") { [weak self] in
+            self?.selectNextTab(nil)
+        })
+        commandRegistry.register(Command(id: "tab.previous", title: "Previous Tab", shortcut: "Cmd+Shift+[", category: "Tabs") { [weak self] in
+            self?.selectPreviousTab(nil)
+        })
+        commandRegistry.register(Command(id: "group.new", title: "New Group", shortcut: "Ctrl+Shift+N", category: "Groups") { [weak self] in
+            self?.createNewGroup()
+        })
+        commandRegistry.register(Command(id: "group.close", title: "Close Group", shortcut: "Ctrl+Shift+W", category: "Groups") { [weak self] in
+            self?.closeActiveGroup()
+        })
+        commandRegistry.register(Command(id: "group.next", title: "Next Group", shortcut: "Ctrl+Shift+]", category: "Groups") { [weak self] in
+            self?.switchToNextGroup()
+        })
+        commandRegistry.register(Command(id: "group.previous", title: "Previous Group", shortcut: "Ctrl+Shift+[", category: "Groups") { [weak self] in
+            self?.switchToPreviousGroup()
+        })
+        commandRegistry.register(Command(id: "view.sidebar", title: "Toggle Sidebar", shortcut: "Cmd+Opt+S", category: "View") { [weak self] in
+            self?.toggleSidebar()
+        })
+        commandRegistry.register(Command(id: "view.fullscreen", title: "Toggle Full Screen", shortcut: "Ctrl+Cmd+F", category: "View") { [weak self] in
+            self?.window?.toggleFullScreen(nil)
+        })
+        commandRegistry.register(Command(id: "window.new", title: "New Window", shortcut: "Cmd+N", category: "Window") {
+            if let appDelegate = NSApp.delegate as? AppDelegate {
+                appDelegate.createNewWindow()
+            }
+        })
     }
 
     private func setupUI() {
@@ -142,13 +183,16 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             activeTabs: group?.tabs ?? [],
             activeTabID: group?.activeTabID,
             showSidebar: windowSession.showSidebar,
+            showCommandPalette: windowSession.showCommandPalette,
+            commandRegistry: commandRegistry,
             splitContainerView: splitContainerView ?? SplitContainerView(registry: SurfaceRegistry()),
             onTabSelected: { [weak self] tabID in self?.switchToTab(id: tabID) },
             onGroupSelected: { [weak self] groupID in self?.switchToGroup(id: groupID) },
             onNewTab: { [weak self] in self?.createNewTab() },
             onNewGroup: { [weak self] in self?.createNewGroup() },
             onCloseTab: { [weak self] tabID in self?.closeTab(id: tabID) },
-            onToggleSidebar: { [weak self] in self?.toggleSidebar() }
+            onToggleSidebar: { [weak self] in self?.toggleSidebar() },
+            onDismissCommandPalette: { [weak self] in self?.dismissCommandPalette() }
         )
     }
 
@@ -381,6 +425,22 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     @objc func toggleSidebar() {
         windowSession.showSidebar.toggle()
         refreshHostingView()
+    }
+
+    @objc func toggleCommandPalette() {
+        if windowSession.showCommandPalette {
+            dismissCommandPalette()
+        } else {
+            windowSession.showCommandPalette = true
+            refreshHostingView()
+        }
+    }
+
+    private func dismissCommandPalette() {
+        guard windowSession.showCommandPalette else { return }
+        windowSession.showCommandPalette = false
+        refreshHostingView()
+        restoreFocus()
     }
 
     private func restoreFocus() {
@@ -675,6 +735,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidResignKey(_ notification: Notification) {
         focusedController?.setFocus(false)
+        if windowSession.showCommandPalette {
+            dismissCommandPalette()
+        }
     }
 
     func windowDidChangeBackingProperties(_ notification: Notification) {

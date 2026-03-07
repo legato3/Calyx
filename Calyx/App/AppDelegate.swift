@@ -196,6 +196,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         fullScreenItem.keyEquivalentModifierMask = [.command, .control]
         viewMenu.addItem(fullScreenItem)
 
+        viewMenu.addItem(.separator())
+
+        let paletteItem = NSMenuItem(
+            title: "Command Palette",
+            action: #selector(CalyxWindowController.toggleCommandPalette),
+            keyEquivalent: "p"
+        )
+        paletteItem.keyEquivalentModifierMask = [.command, .shift]
+        viewMenu.addItem(paletteItem)
+
         // Window menu
         let windowMenuItem = NSMenuItem()
         mainMenu.addItem(windowMenuItem)
