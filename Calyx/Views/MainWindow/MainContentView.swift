@@ -71,7 +71,7 @@ struct MainContentView: View {
                                 onDismiss: onDismissCommandPalette
                             )
                             .frame(width: 500, height: 340)
-                            .glassEffect(.regular)
+                            .glassEffect(.regular, in: .rect(cornerRadius: 12))
 
                             Spacer()
                         }

@@ -35,6 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupMainMenu()
         registerNotificationObservers()
+        installKeyMonitor()
         createNewWindow()
     }
 
@@ -242,6 +243,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Actions
+
+    private func installKeyMonitor() {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let mods = event.modifierFlags.intersection([.command, .shift, .control, .option])
+            if mods == [.command, .shift],
+               event.charactersIgnoringModifiers?.lowercased() == "p" {
+                if let wc = self?.windowControllers.first(where: { $0.window?.isKeyWindow == true }) {
+                    wc.toggleCommandPalette()
+                    return nil // consume the event
+                }
+            }
+            return event
+        }
+    }
 
     @objc private func openPreferences(_ sender: Any?) {
         SettingsWindowController.shared.showSettings()
