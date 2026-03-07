@@ -1,32 +1,26 @@
 // GlassEffectHelper.swift
 // Calyx
 //
-// Isolates all macOS 26 Liquid Glass API usage behind @available guards.
-// No Glass types appear in non-guarded code paths.
+// Helper for Liquid Glass effects (AppKit layer).
+// CommandPaletteView uses applyBackground(to:) — keep this public API stable.
 
 import AppKit
 
 enum GlassEffectHelper {
 
     static var isGlassAvailable: Bool {
-        if #available(macOS 26.0, *) {
-            return !reducedTransparency
-        }
-        return false
+        !reducedTransparency
     }
 
     static var reducedTransparency: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
     }
 
-    @available(macOS 26.0, *)
     static func applyGlassBackground(to view: NSView) {
         guard !reducedTransparency else {
             applyFallbackBackground(to: view, color: .windowBackgroundColor)
             return
         }
-        // macOS 26 Glass API: NSGlassContainerView or similar
-        // For now, use a vibrancy effect as the best available approximation
         let effect = NSVisualEffectView(frame: view.bounds)
         effect.material = .headerView
         effect.blendingMode = .behindWindow
@@ -42,9 +36,7 @@ enum GlassEffectHelper {
 
     static func applyBackground(to view: NSView) {
         if isGlassAvailable {
-            if #available(macOS 26.0, *) {
-                applyGlassBackground(to: view)
-            }
+            applyGlassBackground(to: view)
         } else {
             applyFallbackBackground(to: view, color: .windowBackgroundColor)
         }

@@ -14,6 +14,8 @@ struct SidebarContentView: View {
     var onNewGroup: (() -> Void)?
     var onCloseTab: ((UUID) -> Void)?
 
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -23,6 +25,7 @@ struct SidebarContentView: View {
                             group: group,
                             isActiveGroup: group.id == activeGroupID,
                             activeTabID: activeTabID,
+                            reduceTransparency: reduceTransparency,
                             onGroupSelected: onGroupSelected,
                             onTabSelected: onTabSelected,
                             onCloseTab: onCloseTab
@@ -39,12 +42,36 @@ struct SidebarContentView: View {
                 Label("New Group", systemImage: "folder.badge.plus")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(.plain)
+            .modifier(GlassButtonModifier(reduceTransparency: reduceTransparency))
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
         .frame(minWidth: 180)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .modifier(SidebarBackgroundModifier(reduceTransparency: reduceTransparency))
+    }
+}
+
+private struct GlassButtonModifier: ViewModifier {
+    let reduceTransparency: Bool
+
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.buttonStyle(.plain)
+        } else {
+            content.buttonStyle(.glass)
+        }
+    }
+}
+
+private struct SidebarBackgroundModifier: ViewModifier {
+    let reduceTransparency: Bool
+
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background(Color(nsColor: .controlBackgroundColor))
+        } else {
+            content.glassEffect(.regular, in: .rect)
+        }
     }
 }
 
@@ -52,6 +79,7 @@ private struct GroupSectionView: View {
     let group: TabGroup
     let isActiveGroup: Bool
     let activeTabID: UUID?
+    let reduceTransparency: Bool
     var onGroupSelected: ((UUID) -> Void)?
     var onTabSelected: ((UUID) -> Void)?
     var onCloseTab: ((UUID) -> Void)?
@@ -74,11 +102,11 @@ private struct GroupSectionView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
-                .background(
-                    isActiveGroup
-                        ? RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.15))
-                        : nil
-                )
+                .modifier(GroupHeaderBackgroundModifier(
+                    isActiveGroup: isActiveGroup,
+                    reduceTransparency: reduceTransparency,
+                    groupColor: group.color
+                ))
             }
             .buttonStyle(.plain)
 
@@ -95,6 +123,26 @@ private struct GroupSectionView: View {
             }
         }
         .padding(.bottom, 4)
+    }
+}
+
+private struct GroupHeaderBackgroundModifier: ViewModifier {
+    let isActiveGroup: Bool
+    let reduceTransparency: Bool
+    let groupColor: TabGroupColor
+
+    func body(content: Content) -> some View {
+        if isActiveGroup {
+            if reduceTransparency {
+                content.background(
+                    RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.15))
+                )
+            } else {
+                content.glassEffect(.regular.tint(groupColor.color))
+            }
+        } else {
+            content
+        }
     }
 }
 

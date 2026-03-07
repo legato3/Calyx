@@ -17,13 +17,16 @@ class CalyxWindow: NSWindow {
 
     private func setupWindow() {
         title = "Calyx"
-        titlebarAppearsTransparent = true
+        titlebarAppearsTransparent = false
         titleVisibility = .hidden
         minSize = NSSize(width: 400, height: 300)
         isReleasedWhenClosed = false
 
         styleMask.insert(.fullSizeContentView)
         tabbingMode = .disallowed
+
+        isOpaque = false
+        backgroundColor = .clear
     }
 
     override var canBecomeKey: Bool { true }

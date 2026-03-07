@@ -20,35 +20,42 @@ struct MainContentView: View {
     var onCloseTab: ((UUID) -> Void)?
     var onToggleSidebar: (() -> Void)?
 
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     var body: some View {
-        HStack(spacing: 0) {
-            if showSidebar {
-                SidebarContentView(
-                    groups: groups,
-                    activeGroupID: activeGroupID,
-                    activeTabID: activeTabID,
-                    onGroupSelected: onGroupSelected,
-                    onTabSelected: onTabSelected,
-                    onNewGroup: onNewGroup,
-                    onCloseTab: onCloseTab
-                )
-                .frame(width: 220)
-
-                Divider()
-            }
-
-            VStack(spacing: 0) {
-                if activeTabs.count > 1 {
-                    TabBarContentView(
-                        tabs: activeTabs,
+        GlassEffectContainer {
+            HStack(spacing: 0) {
+                if showSidebar {
+                    SidebarContentView(
+                        groups: groups,
+                        activeGroupID: activeGroupID,
                         activeTabID: activeTabID,
+                        onGroupSelected: onGroupSelected,
                         onTabSelected: onTabSelected,
-                        onNewTab: onNewTab,
+                        onNewGroup: onNewGroup,
                         onCloseTab: onCloseTab
                     )
+                    .frame(width: 220)
+
+                    if reduceTransparency {
+                        Divider()
+                    }
                 }
 
-                TerminalContainerView(splitContainerView: splitContainerView)
+                VStack(spacing: 0) {
+                    if activeTabs.count > 1 {
+                        TabBarContentView(
+                            tabs: activeTabs,
+                            activeTabID: activeTabID,
+                            onTabSelected: onTabSelected,
+                            onNewTab: onNewTab,
+                            onCloseTab: onCloseTab
+                        )
+                    }
+
+                    TerminalContainerView(splitContainerView: splitContainerView)
+                        .opacity(0.85)
+                }
             }
         }
     }

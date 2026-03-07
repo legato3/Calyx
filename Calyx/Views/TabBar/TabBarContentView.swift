@@ -12,6 +12,8 @@ struct TabBarContentView: View {
     var onNewTab: (() -> Void)?
     var onCloseTab: ((UUID) -> Void)?
 
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     var body: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -33,12 +35,36 @@ struct TabBarContentView: View {
                 Image(systemName: "plus")
                     .font(.caption)
             }
-            .buttonStyle(.plain)
+            .modifier(GlassButtonModifier(reduceTransparency: reduceTransparency))
             .padding(.horizontal, 8)
         }
         .padding(.horizontal, 4)
         .frame(height: 32)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .modifier(TabBarBackgroundModifier(reduceTransparency: reduceTransparency))
+    }
+}
+
+private struct GlassButtonModifier: ViewModifier {
+    let reduceTransparency: Bool
+
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.buttonStyle(.plain)
+        } else {
+            content.buttonStyle(.glass)
+        }
+    }
+}
+
+private struct TabBarBackgroundModifier: ViewModifier {
+    let reduceTransparency: Bool
+
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background(Color(nsColor: .windowBackgroundColor))
+        } else {
+            content.glassEffect(.regular, in: .rect)
+        }
     }
 }
 
