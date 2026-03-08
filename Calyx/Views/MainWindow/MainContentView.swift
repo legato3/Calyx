@@ -57,7 +57,7 @@ struct MainContentView: View {
                         }
 
                         TerminalContainerView(splitContainerView: splitContainerView)
-                            .opacity(0.85)
+                            .opacity(0.7)
                     }
 
                     if windowSession.showCommandPalette, let commandRegistry {
