@@ -17,6 +17,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private var closingTabIDs: Set<UUID> = []
     private var focusRequestID: UInt64 = 0
     private var isRestoring = false
+    private var browserControllers: [UUID: BrowserTabController] = [:]
 
     // MARK: - Computed Properties
 
@@ -26,6 +27,23 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     private var activeRegistry: SurfaceRegistry? {
         activeTab?.registry
+    }
+
+    private var activeBrowserController: BrowserTabController? {
+        guard let tab = activeTab, case .browser = tab.content else { return nil }
+        return browserController(for: tab.id)
+    }
+
+    private func browserController(for tabID: UUID) -> BrowserTabController? {
+        if let existing = browserControllers[tabID] { return existing }
+        guard let tab = windowSession.groups.flatMap(\.tabs).first(where: { $0.id == tabID }),
+              case .browser(let url) = tab.content else { return nil }
+        let controller = BrowserTabController(url: url)
+        controller.browserView.onTitleChanged = { [weak tab] title in
+            tab?.title = title
+        }
+        browserControllers[tabID] = controller
+        return controller
     }
 
     // MARK: - Initialization
@@ -125,6 +143,21 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 appDelegate.createNewWindow()
             }
         })
+        commandRegistry.register(Command(id: "browser.open", title: "Open Browser Tab", category: "Browser") { [weak self] in
+            self?.promptAndOpenBrowserTab()
+        })
+        commandRegistry.register(Command(id: "browser.back", title: "Browser Back", category: "Browser") { [weak self] in
+            guard case .browser = self?.activeTab?.content else { return }
+            self?.activeBrowserController?.goBack()
+        })
+        commandRegistry.register(Command(id: "browser.forward", title: "Browser Forward", category: "Browser") { [weak self] in
+            guard case .browser = self?.activeTab?.content else { return }
+            self?.activeBrowserController?.goForward()
+        })
+        commandRegistry.register(Command(id: "browser.reload", title: "Browser Reload", category: "Browser") { [weak self] in
+            guard case .browser = self?.activeTab?.content else { return }
+            self?.activeBrowserController?.reload()
+        })
     }
 
     private func setupUI() {
@@ -184,6 +217,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             windowSession: windowSession,
             commandRegistry: commandRegistry,
             splitContainerView: splitContainerView ?? SplitContainerView(registry: SurfaceRegistry()),
+            activeBrowserController: activeBrowserController,
             onTabSelected: { [weak self] tabID in self?.switchToTab(id: tabID) },
             onGroupSelected: { [weak self] groupID in self?.switchToGroup(id: groupID) },
             onNewTab: { [weak self] in self?.createNewTab() },
@@ -240,6 +274,36 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         return true
     }
 
+    // MARK: - Tab Activation Helpers
+
+    private func activateCurrentTab() {
+        guard let tab = activeTab else { return }
+        switch tab.content {
+        case .terminal:
+            tab.registry.resumeAll()
+            rebuildSplitContainer()
+            updateTerminalLayout()
+            if !focusActiveTabImmediately() {
+                restoreFocus()
+            }
+        case .browser:
+            refreshHostingView()
+            DispatchQueue.main.async { [weak self] in
+                if let bv = self?.browserController(for: tab.id)?.browserView {
+                    self?.window?.makeFirstResponder(bv)
+                }
+            }
+        }
+    }
+
+    private func deactivateCurrentTab() {
+        guard let tab = activeTab else { return }
+        if case .terminal = tab.content {
+            focusedController?.setFocus(false)
+            tab.registry.pauseAll()
+        }
+    }
+
     // MARK: - Tab Operations
 
     func createNewTab(inheritedConfig: Any? = nil) {
@@ -278,6 +342,64 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         requestSave()
     }
 
+    func createBrowserTab(url: URL) {
+        guard let group = windowSession.activeGroup else { return }
+        let tab = Tab(title: url.host() ?? url.absoluteString, content: .browser(url: url))
+
+        deactivateCurrentTab()
+
+        group.addTab(tab)
+        group.activeTabID = tab.id
+
+        let controller = BrowserTabController(url: url)
+        controller.browserView.onTitleChanged = { [weak tab] title in
+            tab?.title = title
+        }
+        browserControllers[tab.id] = controller
+
+        refreshHostingView()
+        DispatchQueue.main.async { [weak self] in
+            self?.window?.makeFirstResponder(controller.browserView)
+        }
+        requestSave()
+    }
+
+    func promptAndOpenBrowserTab() {
+        let alert = NSAlert()
+        alert.messageText = "Open Browser Tab"
+        alert.informativeText = "Enter a URL:"
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+
+        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        textField.placeholderString = "https://example.com"
+        alert.accessoryView = textField
+
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return }
+
+        var input = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !input.isEmpty else { return }
+
+        // Normalize: add https:// if no scheme
+        if !input.contains("://") {
+            input = "https://" + input
+        }
+
+        guard let url = URL(string: input),
+              let scheme = url.scheme,
+              BrowserSecurity.isAllowedTopLevelScheme(scheme) else {
+            let errorAlert = NSAlert()
+            errorAlert.messageText = "Invalid URL"
+            errorAlert.informativeText = "Only http and https URLs are allowed."
+            errorAlert.alertStyle = .warning
+            errorAlert.runModal()
+            return
+        }
+
+        createBrowserTab(url: url)
+    }
+
     private func closeTab(id tabID: UUID) {
         // Prevent double execution
         guard !closingTabIDs.contains(tabID) else { return }
@@ -288,6 +410,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         guard let tab = group.tabs.first(where: { $0.id == tabID }) else { return }
 
         closingTabIDs.insert(tabID)
+
+        // Clean up browser controller if present
+        browserControllers.removeValue(forKey: tabID)
 
         // Destroy all surfaces in the tab
         for surfaceID in tab.registry.allIDs {
@@ -318,15 +443,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
         guard group.activeTabID != tabID else { return }
 
-        focusedController?.setFocus(false)
-
+        deactivateCurrentTab()
         group.activeTabID = tabID
-
-        rebuildSplitContainer()
-        updateTerminalLayout()
-        if !focusActiveTabImmediately() {
-            restoreFocus()
-        }
+        activateCurrentTab()
     }
 
     func switchToGroup(id groupID: UUID) {
@@ -336,15 +455,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
         guard windowSession.activeGroupID != groupID else { return }
 
-        focusedController?.setFocus(false)
-
+        deactivateCurrentTab()
         windowSession.activeGroupID = groupID
-
-        rebuildSplitContainer()
-        updateTerminalLayout()
-        if !focusActiveTabImmediately() {
-            restoreFocus()
-        }
+        activateCurrentTab()
     }
 
     // MARK: - Group Operations
@@ -393,6 +506,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         // Mark all tabs as closing to prevent notification handler from double-deleting
         let tabIDs = group.tabs.map { $0.id }
+        // Clean up browser controllers for all tabs in this group
+        for tabID in tabIDs {
+            browserControllers.removeValue(forKey: tabID)
+        }
         for tabID in tabIDs {
             closingTabIDs.insert(tabID)
         }
@@ -412,11 +529,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         switch result {
         case .switchedTab(_, _), .switchedGroup(_, _):
-            rebuildSplitContainer()
-            updateLayout()
-            activeTab?.registry.resumeAll()
+            activateCurrentTab()
             refreshHostingView()
-            restoreFocus()
             requestSave()
         case .windowShouldClose:
             window?.close()
@@ -425,21 +539,15 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func switchToNextGroup() {
-        activeTab?.registry.pauseAll()
+        deactivateCurrentTab()
         windowSession.nextGroup()
-        rebuildSplitContainer()
-        updateLayout()
-        activeTab?.registry.resumeAll()
-        restoreFocus()
+        activateCurrentTab()
     }
 
     private func switchToPreviousGroup() {
-        activeTab?.registry.pauseAll()
+        deactivateCurrentTab()
         windowSession.previousGroup()
-        rebuildSplitContainer()
-        updateLayout()
-        activeTab?.registry.resumeAll()
-        restoreFocus()
+        activateCurrentTab()
     }
 
     @objc func toggleSidebar() {
@@ -458,7 +566,15 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private func dismissCommandPalette() {
         guard windowSession.showCommandPalette else { return }
         windowSession.showCommandPalette = false
-        restoreFocus()
+        guard let tab = activeTab else { return }
+        switch tab.content {
+        case .terminal:
+            restoreFocus()
+        case .browser:
+            if let bv = activeBrowserController?.browserView {
+                window?.makeFirstResponder(bv)
+            }
+        }
     }
 
     private func restoreFocus() {
@@ -780,24 +896,20 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         _ = group // silence warning
     }
 
+    @objc func newBrowserTab(_ sender: Any?) {
+        promptAndOpenBrowserTab()
+    }
+
     @objc func selectNextTab(_ sender: Any?) {
-        focusedController?.setFocus(false)
+        deactivateCurrentTab()
         windowSession.nextTab()
-        rebuildSplitContainer()
-        updateTerminalLayout()
-        if !focusActiveTabImmediately() {
-            restoreFocus()
-        }
+        activateCurrentTab()
     }
 
     @objc func selectPreviousTab(_ sender: Any?) {
-        focusedController?.setFocus(false)
+        deactivateCurrentTab()
         windowSession.previousTab()
-        rebuildSplitContainer()
-        updateTerminalLayout()
-        if !focusActiveTabImmediately() {
-            restoreFocus()
-        }
+        activateCurrentTab()
     }
 
     @objc func selectTab1(_ sender: Any?) { selectTabByIndex(0) }
@@ -811,13 +923,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     @objc func selectTab9(_ sender: Any?) { selectTabByIndex(8) }
 
     private func selectTabByIndex(_ index: Int) {
-        focusedController?.setFocus(false)
+        deactivateCurrentTab()
         windowSession.selectTab(at: index)
-        rebuildSplitContainer()
-        updateTerminalLayout()
-        if !focusActiveTabImmediately() {
-            restoreFocus()
-        }
+        activateCurrentTab()
     }
 
     // MARK: - Session Persistence
@@ -884,8 +992,14 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidBecomeKey(_ notification: Notification) {
         GhosttyAppController.shared.setFocus(true)
-        focusedController?.setFocus(true)
-        restoreFocus()
+        if case .browser = activeTab?.content {
+            if let bv = activeBrowserController?.browserView {
+                window?.makeFirstResponder(bv)
+            }
+        } else {
+            focusedController?.setFocus(true)
+            restoreFocus()
+        }
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -920,6 +1034,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 }
             }
         }
+
+        browserControllers.removeAll()
 
         if let appDelegate = NSApp.delegate as? AppDelegate {
             appDelegate.removeWindowController(self)

@@ -179,6 +179,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         fileMenu.addItem(withTitle: "New Window", action: #selector(createNewWindow), keyEquivalent: "n")
         fileMenu.addItem(withTitle: "New Tab", action: #selector(CalyxWindowController.newTab(_:)), keyEquivalent: "t")
+        fileMenu.addItem(withTitle: "New Browser Tab", action: #selector(CalyxWindowController.newBrowserTab(_:)), keyEquivalent: "")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Close Tab", action: #selector(CalyxWindowController.closeTab(_:)), keyEquivalent: "w")
 
@@ -353,6 +354,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         var anyTabRestored = false
         for group in windowSession.groups {
             for tab in group.tabs {
+                // Browser tabs don't need surface restoration
+                if case .browser = tab.content {
+                    anyTabRestored = true
+                    continue
+                }
                 if restoreTabSurfaces(tab: tab, app: app, window: window) {
                     anyTabRestored = true
                 } else {

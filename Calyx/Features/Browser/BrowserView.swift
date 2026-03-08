@@ -13,6 +13,7 @@ class BrowserView: NSView {
     private let state: BrowserState
     private let downloadManager: DownloadManager
     private var redirectCounts: [ObjectIdentifier: Int] = [:]
+    var onTitleChanged: ((String) -> Void)?
 
     init(state: BrowserState, downloadManager: DownloadManager = DownloadManager()) {
         self.state = state
@@ -109,6 +110,7 @@ extension BrowserView: WKNavigationDelegate {
         state.canGoBack = webView.canGoBack
         state.canGoForward = webView.canGoForward
         state.title = webView.title ?? state.url.host() ?? state.url.absoluteString
+        onTitleChanged?(state.title)
         if let currentURL = webView.url {
             state.url = currentURL
         }
@@ -119,6 +121,7 @@ extension BrowserView: WKNavigationDelegate {
         didStartProvisionalNavigation navigation: WKNavigation!
     ) {
         state.isLoading = true
+        state.lastError = nil
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -129,6 +132,7 @@ extension BrowserView: WKNavigationDelegate {
         state.canGoBack = webView.canGoBack
         state.canGoForward = webView.canGoForward
         state.title = webView.title ?? state.url.host() ?? state.url.absoluteString
+        onTitleChanged?(state.title)
         if let currentURL = webView.url {
             state.url = currentURL
         }
@@ -143,6 +147,7 @@ extension BrowserView: WKNavigationDelegate {
             redirectCounts.removeValue(forKey: ObjectIdentifier(navigation))
         }
         state.isLoading = false
+        state.lastError = error.localizedDescription
         logger.error("Navigation failed: \(error.localizedDescription)")
     }
 
@@ -155,6 +160,7 @@ extension BrowserView: WKNavigationDelegate {
             redirectCounts.removeValue(forKey: ObjectIdentifier(navigation))
         }
         state.isLoading = false
+        state.lastError = error.localizedDescription
         logger.error("Provisional navigation failed: \(error.localizedDescription)")
     }
 }

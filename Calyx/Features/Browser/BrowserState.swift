@@ -7,6 +7,7 @@ class BrowserState {
     var canGoBack: Bool = false
     var canGoForward: Bool = false
     var title: String
+    var lastError: String?
 
     init(url: URL) {
         self.url = url

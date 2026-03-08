@@ -10,6 +10,7 @@ struct MainContentView: View {
     @Bindable var windowSession: WindowSession
     let commandRegistry: CommandRegistry?
     let splitContainerView: SplitContainerView
+    var activeBrowserController: BrowserTabController?
 
     var onTabSelected: ((UUID) -> Void)?
     var onGroupSelected: ((UUID) -> Void)?
@@ -57,11 +58,15 @@ struct MainContentView: View {
                             )
                         }
 
-                        TerminalContainerView(
-                            splitContainerView: splitContainerView,
-                            reduceTransparency: reduceTransparency
-                        )
-                        .opacity(reduceTransparency ? 1.0 : 0.7)
+                        if let browserController = activeBrowserController {
+                            BrowserContainerView(controller: browserController)
+                        } else {
+                            TerminalContainerView(
+                                splitContainerView: splitContainerView,
+                                reduceTransparency: reduceTransparency
+                            )
+                            .opacity(reduceTransparency ? 1.0 : 0.7)
+                        }
                     }
 
                     if windowSession.showCommandPalette, let commandRegistry {
