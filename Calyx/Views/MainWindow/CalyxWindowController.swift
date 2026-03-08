@@ -741,10 +741,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func handleDesktopNotification(_ notification: Notification) {
         guard let surfaceView = notification.object as? SurfaceView else { return }
-        guard belongsToThisWindow(surfaceView) else { return }
+        guard let (owningTab, _) = findTab(for: surfaceView) else { return }
         guard let title = notification.userInfo?["title"] as? String else { return }
         let body = notification.userInfo?["body"] as? String ?? ""
-        guard let (owningTab, _) = findTab(for: surfaceView) else { return }
 
         let isActiveAndVisible = owningTab.id == activeTab?.id && (window?.isKeyWindow ?? false)
         guard !isActiveAndVisible else { return }
