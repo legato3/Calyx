@@ -117,14 +117,17 @@ final class SurfaceRegistry {
 
     func pauseAll() {
         for id in allIDs {
-            entries[id]?.controller.setOcclusion(true)
+            print("[TAB DEBUG] pauseAll: surface \(id.uuidString.prefix(8)) setFocus(false)")
             entries[id]?.controller.setFocus(false)
+            entries[id]?.view.resetFocusState()
         }
     }
 
     func resumeAll() {
         for id in allIDs {
-            entries[id]?.controller.setOcclusion(false)
+            print("[TAB DEBUG] resumeAll: surface \(id.uuidString.prefix(8)) refresh")
+            entries[id]?.controller.refresh()
+            entries[id]?.view.needsDisplay = true
         }
     }
 

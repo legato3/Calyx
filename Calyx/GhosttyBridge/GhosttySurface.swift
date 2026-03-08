@@ -136,6 +136,12 @@ final class GhosttySurfaceController: Identifiable {
         GhosttyFFI.surfaceSetOcclusion(surface, occluded: occluded)
     }
 
+    /// Request a redraw for the current surface.
+    func refresh() {
+        guard let surface else { return }
+        GhosttyFFI.surfaceRefresh(surface)
+    }
+
     /// Set the display ID (used for vsync with CVDisplayLink).
     func setDisplayID(_ displayID: UInt32) {
         guard let surface else { return }

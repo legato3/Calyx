@@ -299,17 +299,25 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             logger.warning("Attempted to switch to non-existent tab: \(tabID)")
             return
         }
+        guard group.activeTabID != tabID else { return }
+
+        let oldTab = activeTab
+        print("[TAB DEBUG] switchToTab: old=\(oldTab?.id.uuidString.prefix(8) ?? "nil"), new=\(tabID.uuidString.prefix(8))")
 
         // Pause old tab
-        activeTab?.registry.pauseAll()
+        oldTab?.registry.pauseAll()
+        print("[TAB DEBUG] pauseAll on old tab done")
 
         group.activeTabID = tabID
 
-        // Resume new tab
-        activeTab?.registry.resumeAll()
+        let newTab = activeTab
+        print("[TAB DEBUG] activeTab after switch: \(newTab?.id.uuidString.prefix(8) ?? "nil")")
 
         rebuildSplitContainer()
         updateLayout()
+        // Resume after attaching the new tab's views to avoid dropped render updates.
+        newTab?.registry.resumeAll()
+        print("[TAB DEBUG] resumeAll on new tab done")
 
         restoreFocus()
         requestSave()
@@ -320,17 +328,17 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             logger.warning("Attempted to switch to non-existent group: \(groupID)")
             return
         }
+        guard windowSession.activeGroupID != groupID else { return }
 
         // Pause old group's active tab
         activeTab?.registry.pauseAll()
 
         windowSession.activeGroupID = groupID
 
-        // Resume new group's active tab
-        activeTab?.registry.resumeAll()
-
         rebuildSplitContainer()
         updateLayout()
+        // Resume after layout so the active tab is visible when render resumes.
+        activeTab?.registry.resumeAll()
 
         restoreFocus()
         requestSave()
@@ -400,9 +408,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         switch result {
         case .switchedTab(_, _), .switchedGroup(_, _):
-            activeTab?.registry.resumeAll()
             rebuildSplitContainer()
             updateLayout()
+            activeTab?.registry.resumeAll()
             restoreFocus()
             requestSave()
         case .windowShouldClose:
@@ -414,9 +422,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private func switchToNextGroup() {
         activeTab?.registry.pauseAll()
         windowSession.nextGroup()
-        activeTab?.registry.resumeAll()
         rebuildSplitContainer()
         updateLayout()
+        activeTab?.registry.resumeAll()
         restoreFocus()
         requestSave()
     }
@@ -424,9 +432,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private func switchToPreviousGroup() {
         activeTab?.registry.pauseAll()
         windowSession.previousGroup()
-        activeTab?.registry.resumeAll()
         rebuildSplitContainer()
         updateLayout()
+        activeTab?.registry.resumeAll()
         restoreFocus()
         requestSave()
     }
@@ -466,24 +474,34 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private static let focusRestoreTimeout: Double = 0.5
 
     private func attemptFocusRestore(requestID: UInt64, startTime: Double) {
-        guard requestID == focusRequestID else { return }
+        guard requestID == focusRequestID else {
+            print("[FOCUS DEBUG] cancelled: requestID \(requestID) != current \(focusRequestID)")
+            return
+        }
+
+        let elapsed = CACurrentMediaTime() - startTime
 
         // Non-key window → skip; windowDidBecomeKey will call restoreFocus()
-        guard window?.isKeyWindow == true else { return }
+        guard window?.isKeyWindow == true else {
+            print("[FOCUS DEBUG] skipped: window not key (elapsed \(String(format: "%.0f", elapsed * 1000))ms)")
+            return
+        }
 
         guard let tab = activeTab,
               let focusedID = tab.splitTree.focusedLeafID,
               let focusView = tab.registry.view(for: focusedID) else {
-            logger.debug("Focus restore: no focused leaf (request \(requestID))")
+            print("[FOCUS DEBUG] skipped: no focused leaf (elapsed \(String(format: "%.0f", elapsed * 1000))ms)")
             return
         }
 
+        let inWindow = focusView.window === self.window
+        let hasSuperview = focusView.superview != nil
+        print("[FOCUS DEBUG] attempt: leaf \(focusedID), inWindow=\(inWindow), hasSuperview=\(hasSuperview), focused=\(focusView.focused), elapsed=\(String(format: "%.0f", elapsed * 1000))ms, firstResponder=\(String(describing: window?.firstResponder))")
+
         // View must be attached to THIS window's hierarchy
-        guard focusView.window === self.window, focusView.superview != nil else {
-            let elapsed = CACurrentMediaTime() - startTime
+        guard inWindow, hasSuperview else {
             guard elapsed < Self.focusRestoreTimeout else {
-                logger.warning("Focus restore timed out (\(String(format: "%.0f", elapsed * 1000))ms, leaf \(focusedID))")
-                // Fallback: register one-shot layout callback
+                print("[FOCUS DEBUG] TIMED OUT after \(String(format: "%.0f", elapsed * 1000))ms")
                 splitContainerView?.onDeferredLayoutComplete = { [weak self] in
                     guard let self, requestID == self.focusRequestID else { return }
                     self.attemptFocusRestore(requestID: requestID, startTime: CACurrentMediaTime())
@@ -497,10 +515,13 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             return
         }
 
-        if window?.makeFirstResponder(focusView) == true {
+        let result = window?.makeFirstResponder(focusView) ?? false
+        print("[FOCUS DEBUG] makeFirstResponder result=\(result), focusView.focused after=\(focusView.focused)")
+        if result {
+            tab.registry.controller(for: focusedID)?.setFocus(true)
+            tab.registry.controller(for: focusedID)?.refresh()
+            focusView.needsDisplay = true
             activeTab?.unreadNotifications = 0
-        } else {
-            logger.debug("Focus restore: makeFirstResponder failed (leaf \(focusedID), attempt at \(String(format: "%.0f", (CACurrentMediaTime() - startTime) * 1000))ms)")
         }
     }
 
@@ -765,18 +786,18 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     @objc func selectNextTab(_ sender: Any?) {
         activeTab?.registry.pauseAll()
         windowSession.nextTab()
-        activeTab?.registry.resumeAll()
         rebuildSplitContainer()
         updateLayout()
+        activeTab?.registry.resumeAll()
         restoreFocus()
     }
 
     @objc func selectPreviousTab(_ sender: Any?) {
         activeTab?.registry.pauseAll()
         windowSession.previousTab()
-        activeTab?.registry.resumeAll()
         rebuildSplitContainer()
         updateLayout()
+        activeTab?.registry.resumeAll()
         restoreFocus()
     }
 
@@ -793,9 +814,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private func selectTabByIndex(_ index: Int) {
         activeTab?.registry.pauseAll()
         windowSession.selectTab(at: index)
-        activeTab?.registry.resumeAll()
         rebuildSplitContainer()
         updateLayout()
+        activeTab?.registry.resumeAll()
         restoreFocus()
     }
 
@@ -860,11 +881,13 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     // MARK: - NSWindowDelegate
 
     func windowDidBecomeKey(_ notification: Notification) {
+        GhosttyAppController.shared.setFocus(true)
         focusedController?.setFocus(true)
         restoreFocus()
     }
 
     func windowDidResignKey(_ notification: Notification) {
+        GhosttyAppController.shared.setFocus(false)
         focusedController?.setFocus(false)
         if windowSession.showCommandPalette {
             dismissCommandPalette()
