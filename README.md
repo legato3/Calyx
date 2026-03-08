@@ -62,7 +62,7 @@ A macOS 26+ native terminal application built on [libghostty](https://github.com
 
 ```bash
 # Clone with submodules
-git clone --recursive https://github.com/user/calyx.git
+git clone --recursive https://github.com/yuuichieguchi/Calyx.git
 cd calyx
 
 # Build libghostty
