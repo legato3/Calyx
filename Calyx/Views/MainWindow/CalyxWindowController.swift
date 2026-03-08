@@ -16,6 +16,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private let commandRegistry = CommandRegistry()
     private var closingTabIDs: Set<UUID> = []
     private var focusRequestID: UInt64 = 0
+    private var isRestoring = false
 
     // MARK: - Computed Properties
 
@@ -39,15 +40,16 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         self.init(window: window, windowSession: windowSession)
     }
 
-    init(window: NSWindow, windowSession: WindowSession) {
+    init(window: NSWindow, windowSession: WindowSession, restoring: Bool = false) {
         self.windowSession = windowSession
+        self.isRestoring = restoring
         super.init(window: window)
         window.delegate = self
         window.center()
         setupShortcutManager()
         setupCommandRegistry()
         setupUI()
-        setupTerminalSurface()
+        if !restoring { setupTerminalSurface() }
         registerNotificationObservers()
     }
 
@@ -257,6 +259,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         updateLayout()
 
         restoreFocus()
+        requestSave()
     }
 
     private func closeTab(id tabID: UUID) {
@@ -286,6 +289,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             window?.close()
         }
 
+        requestSave()
         closingTabIDs.remove(tabID)
     }
 
@@ -308,6 +312,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         updateLayout()
 
         restoreFocus()
+        requestSave()
     }
 
     func switchToGroup(id groupID: UUID) {
@@ -328,6 +333,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         updateLayout()
 
         restoreFocus()
+        requestSave()
     }
 
     // MARK: - Group Operations
@@ -367,6 +373,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         updateLayout()
 
         restoreFocus()
+        requestSave()
     }
 
     private func closeActiveGroup() {
@@ -397,8 +404,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             rebuildSplitContainer()
             updateLayout()
             restoreFocus()
+            requestSave()
         case .windowShouldClose:
             window?.close()
+            requestSave()
         }
     }
 
@@ -409,6 +418,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         rebuildSplitContainer()
         updateLayout()
         restoreFocus()
+        requestSave()
     }
 
     private func switchToPreviousGroup() {
@@ -418,11 +428,13 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         rebuildSplitContainer()
         updateLayout()
         restoreFocus()
+        requestSave()
     }
 
     @objc func toggleSidebar() {
         windowSession.showSidebar.toggle()
         refreshHostingView()
+        requestSave()
     }
 
     @objc func toggleCommandPalette() {
@@ -488,6 +500,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                            name: .ghosttyEqualizeSplits, object: nil)
         center.addObserver(self, selector: #selector(handleSetTitleNotification(_:)),
                            name: .ghosttySetTitle, object: nil)
+        center.addObserver(self, selector: #selector(handleSetPwdNotification(_:)),
+                           name: .ghosttySetPwd, object: nil)
     }
 
     // MARK: - Notification Handlers
@@ -569,6 +583,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             } else {
                 refreshHostingView()
             }
+            requestSave()
             return
         }
 
@@ -577,6 +592,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             if let focusID = focusTarget, let focusView = owningTab.registry.view(for: focusID) {
                 window?.makeFirstResponder(focusView)
             }
+            requestSave()
         }
     }
 
@@ -670,6 +686,15 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    @objc private func handleSetPwdNotification(_ notification: Notification) {
+        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard belongsToThisWindow(surfaceView) else { return }
+        guard let pwd = notification.userInfo?["pwd"] as? String else { return }
+        guard let (owningTab, _) = findTab(for: surfaceView) else { return }
+        owningTab.pwd = pwd
+        requestSave()
+    }
+
     // MARK: - Menu Actions
 
     @objc func newTab(_ sender: Any?) {
@@ -717,6 +742,41 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         rebuildSplitContainer()
         updateLayout()
         restoreFocus()
+    }
+
+    // MARK: - Session Persistence
+
+    func activateRestoredSession() {
+        isRestoring = false
+        // Pause all tabs except the active one
+        for group in windowSession.groups {
+            for tab in group.tabs {
+                if tab.id != windowSession.activeGroup?.activeTabID {
+                    tab.registry.pauseAll()
+                }
+            }
+        }
+        rebuildSplitContainer()
+        updateLayout()
+        restoreFocus()
+    }
+
+    func windowSnapshot() -> WindowSnapshot {
+        let frame = window?.frame ?? .zero
+        let snap = windowSession.snapshot()
+        return WindowSnapshot(
+            id: snap.id,
+            frame: frame,
+            groups: snap.groups,
+            activeGroupID: snap.activeGroupID,
+            showSidebar: snap.showSidebar
+        )
+    }
+
+    private func requestSave() {
+        if let appDelegate = NSApp.delegate as? AppDelegate {
+            appDelegate.requestSave()
+        }
     }
 
     // MARK: - Helpers

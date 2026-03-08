@@ -6,7 +6,7 @@
 import Foundation
 
 struct SessionSnapshot: Codable, Equatable {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     let schemaVersion: Int
     let windows: [WindowSnapshot]
@@ -17,28 +17,64 @@ struct SessionSnapshot: Codable, Equatable {
     }
 }
 
+extension SessionSnapshot {
+    static func migrate(_ snapshot: SessionSnapshot) -> SessionSnapshot {
+        // Currently v2→v3 defaults are handled by Decodable init.
+        // Just normalize the version number.
+        return SessionSnapshot(schemaVersion: currentSchemaVersion, windows: snapshot.windows)
+    }
+}
+
 struct WindowSnapshot: Codable, Equatable {
     let id: UUID
     let frame: CGRect
     let groups: [TabGroupSnapshot]
     let activeGroupID: UUID?
+    let showSidebar: Bool
 
-    init(id: UUID = UUID(), frame: CGRect = .zero, groups: [TabGroupSnapshot] = [], activeGroupID: UUID? = nil) {
+    private enum CodingKeys: String, CodingKey {
+        case id, frame, groups, activeGroupID, showSidebar
+    }
+
+    init(id: UUID = UUID(), frame: CGRect = .zero, groups: [TabGroupSnapshot] = [], activeGroupID: UUID? = nil, showSidebar: Bool = true) {
         self.id = id
         self.frame = frame
         self.groups = groups
         self.activeGroupID = activeGroupID
+        self.showSidebar = showSidebar
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        frame = try container.decode(CGRect.self, forKey: .frame)
+        groups = try container.decode([TabGroupSnapshot].self, forKey: .groups)
+        activeGroupID = try container.decodeIfPresent(UUID.self, forKey: .activeGroupID)
+        showSidebar = try container.decodeIfPresent(Bool.self, forKey: .showSidebar) ?? true
     }
 
     func clampedToScreen(screenFrame: CGRect) -> WindowSnapshot {
+        // If frame doesn't intersect screen at all, center it
+        if !screenFrame.intersects(frame) {
+            let w = max(frame.width, 400)
+            let h = max(frame.height, 300)
+            let centered = CGRect(
+                x: screenFrame.midX - w / 2,
+                y: screenFrame.midY - h / 2,
+                width: w, height: h
+            )
+            return WindowSnapshot(id: id, frame: centered, groups: groups, activeGroupID: activeGroupID, showSidebar: showSidebar)
+        }
+
         var f = frame
+        // Enforce minimum size first so clamping uses correct dimensions
+        f.size.width = max(f.size.width, 400)
+        f.size.height = max(f.size.height, 300)
         if f.origin.x < screenFrame.origin.x { f.origin.x = screenFrame.origin.x }
         if f.origin.y < screenFrame.origin.y { f.origin.y = screenFrame.origin.y }
         if f.maxX > screenFrame.maxX { f.origin.x = screenFrame.maxX - f.width }
         if f.maxY > screenFrame.maxY { f.origin.y = screenFrame.maxY - f.height }
-        f.size.width = max(f.size.width, 400)
-        f.size.height = max(f.size.height, 300)
-        return WindowSnapshot(id: id, frame: f, groups: groups, activeGroupID: activeGroupID)
+        return WindowSnapshot(id: id, frame: f, groups: groups, activeGroupID: activeGroupID, showSidebar: showSidebar)
     }
 }
 
@@ -48,13 +84,29 @@ struct TabGroupSnapshot: Codable, Equatable {
     let color: String?
     let tabs: [TabSnapshot]
     let activeTabID: UUID?
+    let isCollapsed: Bool
 
-    init(id: UUID = UUID(), name: String = "Default", color: String? = nil, tabs: [TabSnapshot] = [], activeTabID: UUID? = nil) {
+    private enum CodingKeys: String, CodingKey {
+        case id, name, color, tabs, activeTabID, isCollapsed
+    }
+
+    init(id: UUID = UUID(), name: String = "Default", color: String? = nil, tabs: [TabSnapshot] = [], activeTabID: UUID? = nil, isCollapsed: Bool = false) {
         self.id = id
         self.name = name
         self.color = color
         self.tabs = tabs
         self.activeTabID = activeTabID
+        self.isCollapsed = isCollapsed
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        color = try container.decodeIfPresent(String.self, forKey: .color)
+        tabs = try container.decode([TabSnapshot].self, forKey: .tabs)
+        activeTabID = try container.decodeIfPresent(UUID.self, forKey: .activeTabID)
+        isCollapsed = try container.decodeIfPresent(Bool.self, forKey: .isCollapsed) ?? false
     }
 }
 
@@ -90,7 +142,8 @@ extension WindowSession {
             id: id,
             frame: .zero, // Frame is set by the caller from NSWindow
             groups: groups.map { $0.snapshot() },
-            activeGroupID: activeGroupID
+            activeGroupID: activeGroupID,
+            showSidebar: showSidebar
         )
     }
 }
@@ -102,7 +155,8 @@ extension TabGroup {
             name: name,
             color: color.rawValue,
             tabs: tabs.map { $0.snapshot() },
-            activeTabID: activeTabID
+            activeTabID: activeTabID,
+            isCollapsed: isCollapsed
         )
     }
 }
@@ -134,6 +188,33 @@ extension Tab {
             pwd: snapshot.pwd,
             splitTree: snapshot.splitTree,
             content: content
+        )
+    }
+}
+
+extension TabGroup {
+    convenience init(snapshot: TabGroupSnapshot) {
+        let tabs = snapshot.tabs.map { Tab(snapshot: $0) }
+        let color = TabGroupColor(rawValue: snapshot.color ?? "blue") ?? .blue
+        self.init(
+            id: snapshot.id,
+            name: snapshot.name,
+            color: color,
+            isCollapsed: snapshot.isCollapsed,
+            tabs: tabs,
+            activeTabID: snapshot.activeTabID
+        )
+    }
+}
+
+extension WindowSession {
+    convenience init(snapshot: WindowSnapshot) {
+        let groups = snapshot.groups.map { TabGroup(snapshot: $0) }
+        self.init(
+            id: snapshot.id,
+            groups: groups,
+            activeGroupID: snapshot.activeGroupID,
+            showSidebar: snapshot.showSidebar
         )
     }
 }

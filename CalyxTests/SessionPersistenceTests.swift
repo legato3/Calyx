@@ -3,6 +3,8 @@ import XCTest
 
 final class SessionPersistenceTests: XCTestCase {
 
+    // MARK: - Existing Tests (Phase 4/5)
+
     func test_encode_decode_roundtrip() throws {
         let tab1 = TabSnapshot(id: UUID(), title: "Tab 1", pwd: "/home", splitTree: SplitTree(leafID: UUID()))
         let tab2 = TabSnapshot(id: UUID(), title: "Tab 2", pwd: nil, splitTree: SplitTree())
@@ -72,5 +74,398 @@ final class SessionPersistenceTests: XCTestCase {
         let a = SessionSnapshot(windows: [WindowSnapshot(id: id)])
         let b = SessionSnapshot(windows: [WindowSnapshot(id: id)])
         XCTAssertEqual(a, b)
+    }
+
+    // MARK: - Phase 6: Schema v3 — WindowSnapshot gains showSidebar
+
+    /// WindowSnapshot should now have a showSidebar property.
+    /// This test creates a WindowSnapshot with showSidebar=false and verifies the value is stored.
+    func test_v3_windowSnapshot_includes_showSidebar() {
+        let window = WindowSnapshot(
+            id: UUID(),
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            groups: [],
+            activeGroupID: nil,
+            showSidebar: false
+        )
+
+        XCTAssertFalse(window.showSidebar, "showSidebar should be false when explicitly set")
+    }
+
+    /// TabGroupSnapshot should now have an isCollapsed property.
+    /// This test creates a TabGroupSnapshot with isCollapsed=true and verifies the value is stored.
+    func test_v3_tabGroupSnapshot_includes_isCollapsed() {
+        let group = TabGroupSnapshot(
+            id: UUID(),
+            name: "Test",
+            color: "blue",
+            tabs: [],
+            activeTabID: nil,
+            isCollapsed: true
+        )
+
+        XCTAssertTrue(group.isCollapsed, "isCollapsed should be true when explicitly set")
+    }
+
+    /// currentSchemaVersion should be 3 for the v3 schema.
+    func test_v3_schema_version_is_3() {
+        XCTAssertEqual(SessionSnapshot.currentSchemaVersion, 3, "Schema version should be 3 after Phase 6 changes")
+    }
+
+    /// A full encode-decode roundtrip should preserve both showSidebar and isCollapsed.
+    func test_v3_roundtrip_preserves_showSidebar_and_isCollapsed() throws {
+        let tab = TabSnapshot(id: UUID(), title: "Tab", pwd: "/tmp", splitTree: SplitTree(leafID: UUID()))
+        let group = TabGroupSnapshot(
+            id: UUID(),
+            name: "Collapsed Group",
+            color: "red",
+            tabs: [tab],
+            activeTabID: tab.id,
+            isCollapsed: true
+        )
+        let window = WindowSnapshot(
+            id: UUID(),
+            frame: CGRect(x: 50, y: 50, width: 1200, height: 800),
+            groups: [group],
+            activeGroupID: group.id,
+            showSidebar: false
+        )
+        let snapshot = SessionSnapshot(windows: [window])
+
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(SessionSnapshot.self, from: data)
+
+        XCTAssertEqual(decoded.windows[0].showSidebar, false, "showSidebar should survive roundtrip")
+        XCTAssertEqual(decoded.windows[0].groups[0].isCollapsed, true, "isCollapsed should survive roundtrip")
+    }
+
+    // MARK: - Phase 6: Backward Compatibility (v2 JSON without new fields)
+
+    /// v2 JSON that lacks showSidebar should decode with default value of true.
+    func test_v2_json_decodes_with_default_showSidebar_true() throws {
+        // Simulate v2 JSON: no "showSidebar" key in the window object
+        let v2JSON = """
+        {
+            "schemaVersion": 2,
+            "windows": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000001",
+                    "frame": [[0, 0], [800, 600]],
+                    "groups": [],
+                    "activeGroupID": null
+                }
+            ]
+        }
+        """
+        let data = Data(v2JSON.utf8)
+        let decoded = try JSONDecoder().decode(SessionSnapshot.self, from: data)
+
+        XCTAssertEqual(decoded.windows.count, 1)
+        XCTAssertEqual(decoded.windows[0].showSidebar, true, "Missing showSidebar should default to true for v2 compat")
+    }
+
+    /// v2 JSON that lacks isCollapsed should decode with default value of false.
+    func test_v2_json_decodes_with_default_isCollapsed_false() throws {
+        // Simulate v2 JSON: no "isCollapsed" key in the group object
+        let v2JSON = """
+        {
+            "schemaVersion": 2,
+            "windows": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000001",
+                    "frame": [[0, 0], [800, 600]],
+                    "groups": [
+                        {
+                            "id": "00000000-0000-0000-0000-000000000002",
+                            "name": "Default",
+                            "tabs": [],
+                            "activeTabID": null
+                        }
+                    ],
+                    "activeGroupID": null
+                }
+            ]
+        }
+        """
+        let data = Data(v2JSON.utf8)
+        let decoded = try JSONDecoder().decode(SessionSnapshot.self, from: data)
+
+        XCTAssertEqual(decoded.windows[0].groups.count, 1)
+        XCTAssertEqual(decoded.windows[0].groups[0].isCollapsed, false, "Missing isCollapsed should default to false for v2 compat")
+    }
+
+    // MARK: - Phase 6: Migration Pipeline
+
+    /// SessionSnapshot.migrate should update schemaVersion to currentSchemaVersion.
+    func test_migrate_updates_schema_version() {
+        let oldSnapshot = SessionSnapshot(schemaVersion: 1, windows: [])
+        let migrated = SessionSnapshot.migrate(oldSnapshot)
+
+        XCTAssertEqual(migrated.schemaVersion, SessionSnapshot.currentSchemaVersion,
+                       "Migration should update schema version to current")
+    }
+
+    // MARK: - Phase 6: Reverse Conversions
+
+    /// TabGroup(snapshot:) should create a TabGroup from a TabGroupSnapshot,
+    /// preserving id, name, color, isCollapsed, tabs, and activeTabID.
+    @MainActor
+    func test_tabGroup_from_snapshot() {
+        let tabID = UUID()
+        let tabSnap = TabSnapshot(id: tabID, title: "Shell", pwd: "/home/user", splitTree: SplitTree(leafID: UUID()))
+        let groupID = UUID()
+        let groupSnap = TabGroupSnapshot(
+            id: groupID,
+            name: "Work",
+            color: "green",
+            tabs: [tabSnap],
+            activeTabID: tabID,
+            isCollapsed: true
+        )
+
+        let group = TabGroup(snapshot: groupSnap)
+
+        XCTAssertEqual(group.id, groupID, "Group ID should match snapshot")
+        XCTAssertEqual(group.name, "Work", "Group name should match snapshot")
+        XCTAssertEqual(group.color, .green, "Group color should match snapshot")
+        XCTAssertEqual(group.isCollapsed, true, "Group isCollapsed should match snapshot")
+        XCTAssertEqual(group.tabs.count, 1, "Group should have 1 tab")
+        XCTAssertEqual(group.tabs[0].id, tabID, "Tab ID should match snapshot")
+        XCTAssertEqual(group.tabs[0].title, "Shell", "Tab title should match snapshot")
+        XCTAssertEqual(group.activeTabID, tabID, "Active tab ID should match snapshot")
+    }
+
+    /// WindowSession(snapshot:) should create a WindowSession from a WindowSnapshot,
+    /// preserving id, groups, activeGroupID, and showSidebar.
+    @MainActor
+    func test_windowSession_from_snapshot() {
+        let tabSnap = TabSnapshot(id: UUID(), title: "Tab", pwd: "/tmp", splitTree: SplitTree())
+        let groupID = UUID()
+        let groupSnap = TabGroupSnapshot(
+            id: groupID,
+            name: "Dev",
+            color: "purple",
+            tabs: [tabSnap],
+            activeTabID: tabSnap.id,
+            isCollapsed: false
+        )
+        let windowID = UUID()
+        let windowSnap = WindowSnapshot(
+            id: windowID,
+            frame: CGRect(x: 100, y: 200, width: 1024, height: 768),
+            groups: [groupSnap],
+            activeGroupID: groupID,
+            showSidebar: false
+        )
+
+        let session = WindowSession(snapshot: windowSnap)
+
+        XCTAssertEqual(session.id, windowID, "Window ID should match snapshot")
+        XCTAssertEqual(session.groups.count, 1, "Window should have 1 group")
+        XCTAssertEqual(session.groups[0].id, groupID, "Group ID should match snapshot")
+        XCTAssertEqual(session.activeGroupID, groupID, "Active group ID should match snapshot")
+        XCTAssertEqual(session.showSidebar, false, "showSidebar should match snapshot")
+    }
+
+    // MARK: - Phase 6: Forward Conversions Updated
+
+    /// TabGroup.snapshot() should include isCollapsed in the resulting TabGroupSnapshot.
+    @MainActor
+    func test_tabGroup_snapshot_includes_isCollapsed() {
+        let group = TabGroup(name: "Collapsed", color: .red, isCollapsed: true)
+        let snap = group.snapshot()
+
+        XCTAssertEqual(snap.isCollapsed, true, "Snapshot should capture isCollapsed=true")
+
+        let group2 = TabGroup(name: "Open", color: .blue, isCollapsed: false)
+        let snap2 = group2.snapshot()
+
+        XCTAssertEqual(snap2.isCollapsed, false, "Snapshot should capture isCollapsed=false")
+    }
+
+    /// WindowSession.snapshot() should include showSidebar in the resulting WindowSnapshot.
+    @MainActor
+    func test_windowSnapshot_includes_showSidebar() {
+        let session = WindowSession(showSidebar: false)
+        let snap = session.snapshot()
+
+        XCTAssertEqual(snap.showSidebar, false, "Snapshot should capture showSidebar=false")
+
+        let session2 = WindowSession(showSidebar: true)
+        let snap2 = session2.snapshot()
+
+        XCTAssertEqual(snap2.showSidebar, true, "Snapshot should capture showSidebar=true")
+    }
+
+    // MARK: - Phase 6: SplitTree.remapLeafIDs
+
+    /// remapLeafIDs should replace a single leaf's UUID when it appears in the mapping.
+    func test_remapLeafIDs_single_leaf() {
+        let oldID = UUID()
+        let newID = UUID()
+        let tree = SplitTree(leafID: oldID)
+
+        let remapped = tree.remapLeafIDs([oldID: newID])
+
+        let leaves = remapped.allLeafIDs()
+        XCTAssertEqual(leaves, [newID], "Single leaf should be remapped to new ID")
+    }
+
+    /// remapLeafIDs should replace leaf UUIDs in nested splits while preserving tree structure.
+    func test_remapLeafIDs_nested_splits() {
+        let id1 = UUID()
+        let id2 = UUID()
+        let id3 = UUID()
+        let newID1 = UUID()
+        let newID2 = UUID()
+        let newID3 = UUID()
+
+        // Build a tree: split(split(id1, id2), id3)
+        let innerSplit = SplitData(direction: .horizontal, ratio: 0.5, first: .leaf(id: id1), second: .leaf(id: id2))
+        let outerSplit = SplitData(direction: .vertical, ratio: 0.6, first: .split(innerSplit), second: .leaf(id: id3))
+        let tree = SplitTree(root: .split(outerSplit), focusedLeafID: id1)
+
+        let remapped = tree.remapLeafIDs([id1: newID1, id2: newID2, id3: newID3])
+
+        let leaves = remapped.allLeafIDs()
+        XCTAssertEqual(leaves.count, 3, "Remapped tree should still have 3 leaves")
+        XCTAssertTrue(leaves.contains(newID1), "id1 should be remapped to newID1")
+        XCTAssertTrue(leaves.contains(newID2), "id2 should be remapped to newID2")
+        XCTAssertTrue(leaves.contains(newID3), "id3 should be remapped to newID3")
+        XCTAssertFalse(leaves.contains(id1), "Old id1 should not remain")
+        XCTAssertFalse(leaves.contains(id2), "Old id2 should not remain")
+        XCTAssertFalse(leaves.contains(id3), "Old id3 should not remain")
+
+        // Verify structure is preserved: root is a vertical split at ratio 0.6
+        if case .split(let data) = remapped.root {
+            XCTAssertEqual(data.direction, .vertical, "Outer split direction should be preserved")
+            XCTAssertEqual(data.ratio, 0.6, accuracy: 0.001, "Outer split ratio should be preserved")
+
+            if case .split(let inner) = data.first {
+                XCTAssertEqual(inner.direction, .horizontal, "Inner split direction should be preserved")
+                XCTAssertEqual(inner.ratio, 0.5, accuracy: 0.001, "Inner split ratio should be preserved")
+            } else {
+                XCTFail("First child of outer split should still be a split node")
+            }
+        } else {
+            XCTFail("Root should still be a split node")
+        }
+    }
+
+    /// remapLeafIDs should update focusedLeafID when it appears in the mapping.
+    func test_remapLeafIDs_updates_focusedLeafID() {
+        let oldFocused = UUID()
+        let newFocused = UUID()
+        let otherID = UUID()
+
+        let split = SplitData(direction: .horizontal, ratio: 0.5, first: .leaf(id: oldFocused), second: .leaf(id: otherID))
+        let tree = SplitTree(root: .split(split), focusedLeafID: oldFocused)
+
+        let remapped = tree.remapLeafIDs([oldFocused: newFocused])
+
+        XCTAssertEqual(remapped.focusedLeafID, newFocused, "focusedLeafID should be updated when it is in the mapping")
+    }
+
+    /// remapLeafIDs on an empty tree should return an empty tree.
+    func test_remapLeafIDs_empty_tree() {
+        let tree = SplitTree()
+
+        let remapped = tree.remapLeafIDs([UUID(): UUID()])
+
+        XCTAssertTrue(remapped.isEmpty, "Empty tree should remain empty after remapping")
+        XCTAssertNil(remapped.focusedLeafID, "Empty tree should have nil focusedLeafID")
+    }
+
+    /// Leaf IDs not present in the mapping should remain unchanged.
+    func test_remapLeafIDs_unmapped_ids_unchanged() {
+        let keepID = UUID()
+        let changeID = UUID()
+        let newID = UUID()
+
+        let split = SplitData(direction: .vertical, ratio: 0.5, first: .leaf(id: keepID), second: .leaf(id: changeID))
+        let tree = SplitTree(root: .split(split), focusedLeafID: keepID)
+
+        let remapped = tree.remapLeafIDs([changeID: newID])
+
+        let leaves = remapped.allLeafIDs()
+        XCTAssertTrue(leaves.contains(keepID), "Unmapped leaf ID should be unchanged")
+        XCTAssertTrue(leaves.contains(newID), "Mapped leaf ID should be remapped")
+        XCTAssertFalse(leaves.contains(changeID), "Old mapped leaf ID should not remain")
+        XCTAssertEqual(remapped.focusedLeafID, keepID, "focusedLeafID should stay unchanged when not in mapping")
+    }
+
+    // MARK: - Phase 6: clampedToScreen Improvement
+
+    /// When a window frame is completely off-screen (no intersection with screen),
+    /// clampedToScreen should center the window on the screen.
+    func test_clampedToScreen_centers_when_fully_offscreen() {
+        let window = WindowSnapshot(
+            id: UUID(),
+            frame: CGRect(x: 5000, y: 5000, width: 800, height: 600),
+            groups: [],
+            activeGroupID: nil
+        )
+        let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let clamped = window.clampedToScreen(screenFrame: screen)
+
+        // When fully off-screen, the window should be centered on the screen
+        let expectedX = (1920 - 800) / 2.0
+        let expectedY = (1080 - 600) / 2.0
+
+        XCTAssertEqual(clamped.frame.origin.x, expectedX, accuracy: 1.0,
+                       "Fully off-screen window should be centered horizontally")
+        XCTAssertEqual(clamped.frame.origin.y, expectedY, accuracy: 1.0,
+                       "Fully off-screen window should be centered vertically")
+        XCTAssertEqual(clamped.frame.size.width, 800, "Width should be preserved")
+        XCTAssertEqual(clamped.frame.size.height, 600, "Height should be preserved")
+    }
+
+    /// A partially off-screen window should still be clamped (not centered),
+    /// just brought back into view at the nearest edge.
+    func test_clampedToScreen_still_clamps_partially_offscreen() {
+        let window = WindowSnapshot(
+            id: UUID(),
+            frame: CGRect(x: -100, y: -50, width: 800, height: 600),
+            groups: [],
+            activeGroupID: nil
+        )
+        let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let clamped = window.clampedToScreen(screenFrame: screen)
+
+        // Partially off-screen should clamp to edges, not center
+        XCTAssertGreaterThanOrEqual(clamped.frame.origin.x, 0,
+                                    "Partially off-screen should clamp x to screen edge")
+        XCTAssertGreaterThanOrEqual(clamped.frame.origin.y, 0,
+                                    "Partially off-screen should clamp y to screen edge")
+        // Should NOT be centered — it should be at the edge
+        let centeredX = (1920 - 800) / 2.0
+        XCTAssertNotEqual(clamped.frame.origin.x, centeredX,
+                          "Partially off-screen should not be centered, just clamped")
+    }
+
+    // MARK: - Phase 6: SessionPersistenceActor Path
+
+    /// The save path should be ~/.calyx/sessions.json (not Application Support).
+    /// Will fail: sessionSavePath() does not exist yet on SessionPersistenceActor.
+    func test_persistence_actor_save_path() async {
+        let actor = SessionPersistenceActor()
+        let savePath = await actor.sessionSavePath()
+
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        let expectedPath = homeDir.appendingPathComponent(".calyx/sessions.json").path
+
+        XCTAssertEqual(savePath.path, expectedPath,
+                       "Save path should be ~/.calyx/sessions.json")
+    }
+
+    /// The actor should expose a method to migrate from the legacy Application Support path.
+    /// Will fail: migrateFromLegacyPath() does not exist yet on SessionPersistenceActor.
+    func test_persistence_actor_migrate_from_legacy_path() async {
+        let actor = SessionPersistenceActor()
+        // This method should exist; we just verify it doesn't crash and returns a boolean
+        let didMigrate = await actor.migrateFromLegacyPath()
+
+        // Without a legacy file present, migration should return false
+        XCTAssertFalse(didMigrate, "Migration should return false when no legacy file exists")
     }
 }

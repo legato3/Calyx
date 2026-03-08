@@ -18,16 +18,42 @@ actor SessionPersistenceActor {
     static let shared = SessionPersistenceActor()
 
     init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let calyxDir = appSupport.appendingPathComponent("Calyx", isDirectory: true)
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        let calyxDir = homeDir.appendingPathComponent(".calyx", isDirectory: true)
 
         try? FileManager.default.createDirectory(at: calyxDir, withIntermediateDirectories: true, attributes: [
             .posixPermissions: 0o700
         ])
 
-        self.savePath = calyxDir.appendingPathComponent("session.json")
-        self.backupPath = calyxDir.appendingPathComponent("session.json.bak")
+        self.savePath = calyxDir.appendingPathComponent("sessions.json")
+        self.backupPath = calyxDir.appendingPathComponent("sessions.json.bak")
         self.recoveryMarkerPath = calyxDir.appendingPathComponent(".recovery")
+    }
+
+    func sessionSavePath() -> URL {
+        savePath
+    }
+
+    /// Migrate session data from legacy Application Support path to ~/.calyx/.
+    /// Returns true if migration was performed.
+    @discardableResult
+    func migrateFromLegacyPath() -> Bool {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let legacyPath = appSupport.appendingPathComponent("Calyx/session.json")
+
+        guard FileManager.default.fileExists(atPath: legacyPath.path),
+              !FileManager.default.fileExists(atPath: savePath.path) else {
+            return false
+        }
+
+        do {
+            try FileManager.default.copyItem(at: legacyPath, to: savePath)
+            logger.info("Migrated session from legacy path")
+            return true
+        } catch {
+            logger.error("Failed to migrate from legacy path: \(error.localizedDescription)")
+            return false
+        }
     }
 
     // MARK: - Save
@@ -77,6 +103,9 @@ actor SessionPersistenceActor {
     // MARK: - Restore
 
     func restore() -> SessionSnapshot? {
+        // Try migrating from legacy path first
+        migrateFromLegacyPath()
+
         if let snapshot = loadFromPath(savePath) {
             return snapshot
         }
@@ -96,7 +125,8 @@ actor SessionPersistenceActor {
                 return nil
             }
 
-            return snapshot
+            // Apply migration pipeline
+            return SessionSnapshot.migrate(snapshot)
         } catch {
             logger.error("Failed to decode session from \(path.lastPathComponent): \(error.localizedDescription)")
             return nil

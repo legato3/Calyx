@@ -396,4 +396,27 @@ struct SplitTree: Codable, Equatable, Sendable {
             return containsLeaf(data.first, id: id) || containsLeaf(data.second, id: id)
         }
     }
+
+    // MARK: - Remap
+
+    /// Replace leaf UUIDs according to the given mapping.
+    /// Leaf IDs not present in the mapping remain unchanged.
+    /// focusedLeafID is also updated if it appears in the mapping.
+    func remapLeafIDs(_ mapping: [UUID: UUID]) -> SplitTree {
+        guard let root else { return self }
+        let newRoot = Self.remapNode(root, mapping: mapping)
+        let newFocused = focusedLeafID.flatMap { mapping[$0] ?? $0 }
+        return SplitTree(root: newRoot, focusedLeafID: newFocused)
+    }
+
+    private static func remapNode(_ node: SplitNode, mapping: [UUID: UUID]) -> SplitNode {
+        switch node {
+        case .leaf(let id):
+            return .leaf(id: mapping[id] ?? id)
+        case .split(let data):
+            let newFirst = remapNode(data.first, mapping: mapping)
+            let newSecond = remapNode(data.second, mapping: mapping)
+            return .split(SplitData(direction: data.direction, ratio: data.ratio, first: newFirst, second: newSecond))
+        }
+    }
 }

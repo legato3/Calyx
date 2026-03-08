@@ -36,7 +36,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupMainMenu()
         registerNotificationObservers()
         installKeyMonitor()
-        createNewWindow()
+
+        if !restoreSession() {
+            createNewWindow()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -66,6 +69,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        let snapshot = buildSnapshot()
+        var done = false
+        Task {
+            await SessionPersistenceActor.shared.saveImmediately(snapshot)
+            await SessionPersistenceActor.shared.resetRecoveryCounter()
+            done = true
+        }
+        let deadline = Date().addingTimeInterval(1.0)
+        while !done, Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
+        }
         windowControllers.removeAll()
     }
 
@@ -240,6 +254,170 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
 
         NSApp.mainMenu = mainMenu
+    }
+
+    // MARK: - Session Persistence
+
+    func requestSave() {
+        let snapshot = buildSnapshot()
+        Task {
+            await SessionPersistenceActor.shared.save(snapshot)
+        }
+    }
+
+    private func buildSnapshot() -> SessionSnapshot {
+        SessionSnapshot(
+            windows: windowControllers.map { $0.windowSnapshot() }
+        )
+    }
+
+    private func restoreSession() -> Bool {
+        // Crash-loop detection
+        var recoveryCount = 0
+        var snapshot: SessionSnapshot?
+        var done = false
+
+        Task {
+            recoveryCount = await SessionPersistenceActor.shared.incrementRecoveryCounter()
+            if recoveryCount <= SessionPersistenceActor.maxRecoveryAttempts {
+                snapshot = await SessionPersistenceActor.shared.restore()
+            }
+            done = true
+        }
+        let deadline = Date().addingTimeInterval(2.0)
+        while !done, Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
+        }
+
+        guard let snapshot, !snapshot.windows.isEmpty else {
+            logger.info("No session to restore (count=\(recoveryCount))")
+            return false
+        }
+
+        if recoveryCount > SessionPersistenceActor.maxRecoveryAttempts {
+            logger.warning("Crash loop detected (\(recoveryCount) attempts), skipping restore")
+            return false
+        }
+
+        var restoredAny = false
+
+        for windowSnap in snapshot.windows {
+            if restoreWindow(windowSnap) {
+                restoredAny = true
+            }
+        }
+
+        if !restoredAny {
+            logger.warning("Failed to restore any windows")
+            return false
+        }
+
+        // Reset recovery counter after successful restore (delayed to confirm stability)
+        Task {
+            try? await Task.sleep(for: .seconds(5))
+            await SessionPersistenceActor.shared.resetRecoveryCounter()
+        }
+
+        return true
+    }
+
+    private func restoreWindow(_ windowSnap: WindowSnapshot) -> Bool {
+        guard let app = GhosttyAppController.shared.app else { return false }
+
+        // Clamp window frame to screen
+        let screenFrame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let clampedSnap = windowSnap.clampedToScreen(screenFrame: screenFrame)
+
+        // Create WindowSession from snapshot
+        let windowSession = WindowSession(snapshot: clampedSnap)
+        appSession.addWindow(windowSession)
+
+        // Create window with the restored frame
+        let window = CalyxWindow(
+            contentRect: clampedSnap.frame,
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+
+        let wc = CalyxWindowController(window: window, windowSession: windowSession, restoring: true)
+        windowControllers.append(wc)
+
+        // Restore surfaces for each tab
+        var anyTabRestored = false
+        for group in windowSession.groups {
+            for tab in group.tabs {
+                if restoreTabSurfaces(tab: tab, app: app, window: window) {
+                    anyTabRestored = true
+                } else {
+                    // Fallback: create a single new surface for this tab
+                    if fallbackCreateSurface(tab: tab, app: app, window: window) {
+                        anyTabRestored = true
+                    }
+                }
+            }
+        }
+
+        if !anyTabRestored {
+            // Complete failure — clean up the window
+            window.close()
+            appSession.removeWindow(id: windowSession.id)
+            windowControllers.removeAll { $0 === wc }
+            logger.error("Failed to restore any tabs for window \(windowSnap.id)")
+            return false
+        }
+
+        wc.activateRestoredSession()
+        wc.showWindow(nil)
+
+        return true
+    }
+
+    private func restoreTabSurfaces(tab: Tab, app: ghostty_app_t, window: NSWindow) -> Bool {
+        let oldLeafIDs = tab.splitTree.allLeafIDs()
+        guard !oldLeafIDs.isEmpty else { return false }
+
+        var mapping: [UUID: UUID] = [:]
+
+        for oldID in oldLeafIDs {
+            guard let newID = createSurfaceWithPwd(tab: tab, app: app, window: window) else {
+                continue
+            }
+            mapping[oldID] = newID
+        }
+
+        // All leaves must be restored for split integrity
+        if mapping.count == oldLeafIDs.count {
+            tab.splitTree = tab.splitTree.remapLeafIDs(mapping)
+            return true
+        }
+
+        // Partial failure: destroy any surfaces we created and return false
+        for newID in mapping.values {
+            tab.registry.destroySurface(newID)
+        }
+        return false
+    }
+
+    private func fallbackCreateSurface(tab: Tab, app: ghostty_app_t, window: NSWindow) -> Bool {
+        guard let newID = createSurfaceWithPwd(tab: tab, app: app, window: window) else {
+            return false
+        }
+        tab.splitTree = SplitTree(leafID: newID)
+        return true
+    }
+
+    private func createSurfaceWithPwd(tab: Tab, app: ghostty_app_t, window: NSWindow) -> UUID? {
+        var config = GhosttyFFI.surfaceConfigNew()
+        config.scale_factor = Double(window.backingScaleFactor)
+
+        if let pwd = tab.pwd {
+            return pwd.withCString { cStr in
+                config.working_directory = cStr
+                return tab.registry.createSurface(app: app, config: config)
+            }
+        }
+        return tab.registry.createSurface(app: app, config: config)
     }
 
     // MARK: - Actions
