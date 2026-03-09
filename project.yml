@@ -85,17 +85,5 @@ targets:
     dependencies:
       - target: Calyx
 
-schemes:
-  Calyx:
-    build:
-      targets:
-        Calyx: all
-        CalyxTests: [test]
-        CalyxUITests: [test]
-    test:
-      targets:
-        - name: CalyxTests
-        - name: CalyxUITests
-
 fileGroups:
   - Calyx-Bridging-Header.h
