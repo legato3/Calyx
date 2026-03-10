@@ -63,7 +63,7 @@ echo "Push complete."
 
 # 9. Create GitHub release
 echo "Creating GitHub release v$VERSION..."
-git fetch --tags
+git fetch --tags --force
 PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 if [ -n "$PREV_TAG" ]; then
   NOTES=$(git log --pretty=format:"- %s" "$PREV_TAG"..HEAD)
