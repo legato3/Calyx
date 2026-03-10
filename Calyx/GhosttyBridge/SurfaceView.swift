@@ -11,6 +11,7 @@ import os
 
 private let logger = Logger(subsystem: "com.calyx.terminal", category: "SurfaceView")
 
+
 // MARK: - SurfaceView
 
 @MainActor
@@ -43,6 +44,9 @@ class SurfaceView: NSView {
 
     /// Timestamp of the last performKeyEquivalent event for command-key handling.
     private var lastPerformKeyEvent: TimeInterval?
+
+    /// Whether a refresh is needed after the first real (non-zero) size is set.
+    private var needsInitialRefresh = true
 
     // MARK: - NSView Overrides
 
@@ -88,7 +92,6 @@ class SurfaceView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-
         guard let window = self.window else { return }
 
         // Update Metal layer content scale.
@@ -124,7 +127,9 @@ class SurfaceView: NSView {
         guard let surfaceController else { return }
 
         // Detect X/Y scale factor and update surface.
+        // Skip when frame is zero to avoid NaN scale (0/0).
         let fbFrame = convertToBacking(frame)
+        guard frame.width > 0, frame.height > 0 else { return }
         let xScale = fbFrame.width / frame.width
         let yScale = fbFrame.height / frame.height
         surfaceController.setContentScale(x: xScale, y: yScale)
@@ -139,6 +144,9 @@ class SurfaceView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
 
+        // Skip zero-size updates to prevent Metal layer bad state.
+        guard newSize.width > 0, newSize.height > 0 else { return }
+
         // Update the metal layer drawable size.
         let scaledSize = convertToBacking(NSRect(origin: .zero, size: newSize)).size
         if let metalLayer = layer as? CAMetalLayer {
@@ -150,6 +158,12 @@ class SurfaceView: NSView {
             width: UInt32(scaledSize.width),
             height: UInt32(scaledSize.height)
         )
+
+        // Force re-render on the first real size after surface creation.
+        if needsInitialRefresh, window != nil {
+            needsInitialRefresh = false
+            surfaceController?.refresh()
+        }
     }
 
     override func updateTrackingAreas() {

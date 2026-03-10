@@ -77,8 +77,10 @@ final class GhosttySurfaceController: Identifiable {
         )
         config.userdata = Unmanaged.passUnretained(view).toOpaque()
 
-        // Set scale factor from the window or default to 2.0 for Retina.
-        config.scale_factor = Double(view.window?.backingScaleFactor ?? 2.0)
+        if config.scale_factor <= 0 {
+            config.scale_factor = 1.0
+            logger.warning("scale_factor not set by caller, using fallback 1.0")
+        }
 
         // Create the surface.
         guard let newSurface = GhosttyFFI.surfaceNew(app, config: &config) else {
@@ -92,17 +94,18 @@ final class GhosttySurfaceController: Identifiable {
             GhosttyFFI.surfaceSetDisplayID(newSurface, displayID: screen.displayID ?? 0)
         }
 
-        // Set initial content scale.
-        let scale = Double(view.window?.backingScaleFactor ?? 2.0)
-        GhosttyFFI.surfaceSetContentScale(newSurface, xScale: scale, yScale: scale)
+        GhosttyFFI.surfaceSetContentScale(newSurface, xScale: config.scale_factor, yScale: config.scale_factor)
 
         // Set initial size from the view's frame (in backing pixels).
+        // Skip if frame is zero — layout will provide the real size later.
         let backingFrame = view.convertToBacking(view.frame)
-        GhosttyFFI.surfaceSetSize(
-            newSurface,
-            width: UInt32(backingFrame.width),
-            height: UInt32(backingFrame.height)
-        )
+        if backingFrame.width > 0, backingFrame.height > 0 {
+            GhosttyFFI.surfaceSetSize(
+                newSurface,
+                width: UInt32(backingFrame.width),
+                height: UInt32(backingFrame.height)
+            )
+        }
 
         logger.info("Surface created: \(self.id)")
     }
