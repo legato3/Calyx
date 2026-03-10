@@ -76,6 +76,19 @@ class SurfaceScrollView: NSView {
     private var searchTotalObserver: NSObjectProtocol?
     private var searchSelectedObserver: NSObjectProtocol?
 
+    // MARK: - Cell Height
+
+    private func applyCellHeight(pixelHeight: CGFloat) {
+        guard pixelHeight > 0, let window = surfaceView.window else { return }
+        cellHeight = pixelHeight / window.backingScaleFactor
+        synchronizeLayout()
+
+        // Apply any cached scrollbar state now that cellHeight is available.
+        if let scrollbar = surfaceView.surfaceController?.scrollbar {
+            handleScrollbarUpdate(scrollbar)
+        }
+    }
+
     // MARK: - Init
 
     init(surfaceView: SurfaceView) {
@@ -159,8 +172,7 @@ class SurfaceScrollView: NSView {
             let height = notification.userInfo?["height"] as? Double
             MainActor.assumeIsolated {
                 guard let self, let height else { return }
-                self.cellHeight = CGFloat(height) / (self.surfaceView.window?.backingScaleFactor ?? 2.0)
-                self.synchronizeLayout()
+                self.applyCellHeight(pixelHeight: CGFloat(height))
             }
         }
 
@@ -197,6 +209,14 @@ class SurfaceScrollView: NSView {
     private func synchronizeLayout() {
         let contentSize = bounds.size
         guard contentSize.width > 0, contentSize.height > 0 else { return }
+
+        // Apply initial cell size if missed during surface init.
+        if cellHeight <= 0,
+           let controller = surfaceView.surfaceController,
+           controller.cellSize.height > 0 {
+            applyCellHeight(pixelHeight: controller.cellSize.height)
+            return  // applyCellHeight calls synchronizeLayout again with cellHeight set.
+        }
 
         // ScrollView fills our entire bounds
         scrollView.frame = bounds
