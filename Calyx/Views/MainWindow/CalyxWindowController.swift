@@ -432,10 +432,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         let result = windowSession.removeTab(id: tabID, fromGroup: group.id)
 
         switch result {
-        case .switchedTab(_, let newTabID):
-            switchToTab(id: newTabID)
-        case .switchedGroup(let newGroupID, _):
-            switchToGroup(id: newGroupID)
+        case .switchedTab, .switchedGroup:
+            activateCurrentTab()
         case .windowShouldClose:
             window?.close()
         }
