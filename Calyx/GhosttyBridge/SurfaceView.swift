@@ -34,6 +34,9 @@ class SurfaceView: NSView {
     /// Marked text for IME input.
     private var markedText: NSMutableAttributedString = NSMutableAttributedString()
 
+    /// Called when ghostty sends a scrollbar update for this surface.
+    var scrollbarUpdateHandler: ((GhosttySurfaceController.ScrollbarState) -> Void)?
+
     /// Accumulator for text generated during a keyDown event.
     /// Non-nil when we are inside a keyDown handler.
     private var keyTextAccumulator: [String]? = nil

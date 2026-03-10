@@ -14,6 +14,13 @@ private let logger = Logger(subsystem: "com.calyx.terminal", category: "GhosttyS
 @MainActor
 final class GhosttySurfaceController: Identifiable {
 
+    /// Scrollbar state sent from ghostty core.
+    struct ScrollbarState {
+        let total: UInt64
+        let offset: UInt64
+        let len: UInt64
+    }
+
     /// Unique identifier for this surface.
     let id = UUID()
 
@@ -25,6 +32,9 @@ final class GhosttySurfaceController: Identifiable {
 
     /// The current cell size (updated via CELL_SIZE action).
     var cellSize: NSSize = .zero
+
+    /// Latest scrollbar state from ghostty core.
+    var scrollbar: ScrollbarState?
 
     /// The current surface size information.
     var surfaceSize: ghostty_surface_size_s? = nil

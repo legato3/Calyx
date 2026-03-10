@@ -65,6 +65,9 @@ enum GhosttyActionRouter {
         case GHOSTTY_ACTION_CELL_SIZE:
             return handleCellSize(app, target: target, value: action.action.cell_size)
 
+        case GHOSTTY_ACTION_SCROLLBAR:
+            return handleScrollbar(app, target: target, value: action.action.scrollbar)
+
         case GHOSTTY_ACTION_INITIAL_SIZE:
             return handleInitialSize(app, target: target, value: action.action.initial_size)
 
@@ -327,6 +330,22 @@ enum GhosttyActionRouter {
             object: surfaceView,
             userInfo: ["width": value.width, "height": value.height]
         )
+        return true
+    }
+
+    private static func handleScrollbar(
+        _ app: ghostty_app_t,
+        target: ghostty_target_s,
+        value: ghostty_action_scrollbar_s
+    ) -> Bool {
+        guard let surfaceView = surfaceView(from: target) else { return false }
+        let state = GhosttySurfaceController.ScrollbarState(
+            total: value.total,
+            offset: value.offset,
+            len: value.len
+        )
+        surfaceView.surfaceController?.scrollbar = state
+        surfaceView.scrollbarUpdateHandler?(state)
         return true
     }
 

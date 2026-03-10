@@ -305,4 +305,16 @@ final class GhosttyConfigManager {
     var focusFollowsMouse: Bool {
         getBool("focus-follows-mouse", default: false)
     }
+
+    // MARK: - Scrollbar
+
+    enum ScrollbarMode: String {
+        case system
+        case never
+    }
+
+    var scrollbarMode: ScrollbarMode {
+        guard let str = getString("scrollbar") else { return .system }
+        return ScrollbarMode(rawValue: str) ?? .system
+    }
 }

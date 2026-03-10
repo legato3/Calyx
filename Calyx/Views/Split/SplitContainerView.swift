@@ -13,6 +13,7 @@ class SplitContainerView: NSView {
 
     private var registry: SurfaceRegistry
     private var currentTree: SplitTree = SplitTree()
+    private var scrollWrappers: [UUID: SurfaceScrollView] = [:]
     var onRatioChange: ((UUID, Double, SplitDirection) -> Void)?
     var onDeferredLayoutComplete: (() -> Void)?
 
@@ -37,6 +38,7 @@ class SplitContainerView: NSView {
         guard self.registry !== registry else { return }
         self.registry = registry
         currentTree = SplitTree()
+        scrollWrappers.removeAll()
         subviews.forEach { $0.removeFromSuperview() }
         needsLayout = true
     }
@@ -92,10 +94,17 @@ class SplitContainerView: NSView {
         switch node {
         case .leaf(let id):
             if let surfaceView = registry.view(for: id) {
-                surfaceView.frame = rect
-                surfaceView.autoresizingMask = []
-                if surfaceView.superview !== self {
-                    addSubview(surfaceView)
+                let wrapper: SurfaceScrollView
+                if let existing = scrollWrappers[id] {
+                    wrapper = existing
+                } else {
+                    wrapper = SurfaceScrollView(surfaceView: surfaceView)
+                    scrollWrappers[id] = wrapper
+                }
+                wrapper.frame = rect
+                wrapper.autoresizingMask = []
+                if wrapper.superview !== self {
+                    addSubview(wrapper)
                 }
             }
 
@@ -196,16 +205,29 @@ class SplitContainerView: NSView {
         }
     }
 
-    /// Remove SurfaceView subviews not present in the current tree.
-    /// Treats views with unknown IDs (registry.id returns nil) as orphans.
+    /// Remove orphaned subviews not present in the current tree.
+    /// Handles both SurfaceScrollView wrappers and legacy bare SurfaceView subviews.
     private func removeOrphanedSurfaces() {
         let treeIDs = Set(currentTree.allLeafIDs())
         for subview in subviews {
-            guard let surface = subview as? SurfaceView else { continue }
-            let id = registry.id(for: surface)
-            if id == nil || !treeIDs.contains(id!) {
-                subview.removeFromSuperview()
+            if let wrapper = subview as? SurfaceScrollView {
+                let id = registry.id(for: wrapper.surfaceView)
+                if id == nil || !treeIDs.contains(id!) {
+                    subview.removeFromSuperview()
+                    if let id { scrollWrappers.removeValue(forKey: id) }
+                }
+            } else if let surface = subview as? SurfaceView {
+                // Legacy: shouldn't happen, but clean up
+                let id = registry.id(for: surface)
+                if id == nil || !treeIDs.contains(id!) {
+                    subview.removeFromSuperview()
+                }
             }
+        }
+        // Also clean wrapper dictionary of IDs no longer in tree
+        for id in scrollWrappers.keys where !treeIDs.contains(id) {
+            scrollWrappers[id]?.removeFromSuperview()
+            scrollWrappers.removeValue(forKey: id)
         }
     }
 }
