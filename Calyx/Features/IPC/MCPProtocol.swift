@@ -194,6 +194,7 @@ struct MCPInitializeResult: Sendable, Codable {
     let protocolVersion: String
     let capabilities: MCPCapabilities
     let serverInfo: MCPServerInfo
+    let instructions: String?
 }
 
 /// MCP server capabilities.
@@ -345,6 +346,17 @@ struct MCPRouter: Sendable {
         ]
     }
 
+    /// Static, trusted instructions text. Never inject user-controlled content.
+    static let instructions = """
+    You are connected to Calyx IPC, enabling communication with other Claude Code instances in other terminal panes.
+
+    Immediately after connecting, call register_peer once with a descriptive name based on your current task or working directory, and a role describing your function. Do not call register_peer again in the same session.
+
+    After completing any significant task, call receive_messages to check for messages from other peers. When you receive messages, process them and respond via send_message.
+
+    Use list_peers to discover other connected instances. Use broadcast for announcements relevant to all peers.
+    """
+
     /// Build the response for `initialize`.
     static func buildInitializeResponse(id: JSONRPCId) -> JSONRPCResponse {
         let initResult = MCPInitializeResult(
@@ -352,7 +364,8 @@ struct MCPRouter: Sendable {
             capabilities: MCPCapabilities(
                 tools: MCPToolsCapability(listChanged: false)
             ),
-            serverInfo: MCPServerInfo(name: "calyx-ipc", version: "1.0.0")
+            serverInfo: MCPServerInfo(name: "calyx-ipc", version: "1.0.0"),
+            instructions: instructions
         )
 
         return JSONRPCResponse(

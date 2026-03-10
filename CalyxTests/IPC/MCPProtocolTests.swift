@@ -66,6 +66,41 @@ final class MCPProtocolTests: XCTestCase {
                        "Server version must be 1.0.0")
         XCTAssertEqual(initResult.capabilities.tools.listChanged, false,
                        "listChanged must be false")
+
+        XCTAssertNotNil(initResult.instructions,
+                        "Initialize result must contain instructions")
+        XCTAssertFalse(initResult.instructions?.isEmpty ?? true,
+                       "instructions must be a non-empty string")
+        XCTAssertTrue(initResult.instructions?.contains("register_peer") == true,
+                      "instructions must mention register_peer")
+        XCTAssertTrue(initResult.instructions?.contains("receive_messages") == true,
+                      "instructions must mention receive_messages")
+    }
+
+    func test_initializeResult_instructions_codable_roundtrip() throws {
+        // Non-nil case
+        let withInstructions = MCPInitializeResult(
+            protocolVersion: "2024-11-05",
+            capabilities: MCPCapabilities(tools: MCPToolsCapability(listChanged: false)),
+            serverInfo: MCPServerInfo(name: "test", version: "1.0.0"),
+            instructions: "Test instructions"
+        )
+        let data1 = try jsonEncoder.encode(withInstructions)
+        let decoded1 = try jsonDecoder.decode(MCPInitializeResult.self, from: data1)
+        XCTAssertEqual(decoded1.instructions, "Test instructions",
+                       "instructions must survive encode/decode roundtrip")
+
+        // Nil case
+        let withoutInstructions = MCPInitializeResult(
+            protocolVersion: "2024-11-05",
+            capabilities: MCPCapabilities(tools: MCPToolsCapability(listChanged: false)),
+            serverInfo: MCPServerInfo(name: "test", version: "1.0.0"),
+            instructions: nil
+        )
+        let data2 = try jsonEncoder.encode(withoutInstructions)
+        let decoded2 = try jsonDecoder.decode(MCPInitializeResult.self, from: data2)
+        XCTAssertNil(decoded2.instructions,
+                     "nil instructions must remain nil after roundtrip")
     }
 
     // ==================== 2. Tools List — All 7 Tools ====================

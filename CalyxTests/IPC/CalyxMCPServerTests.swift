@@ -212,6 +212,12 @@ final class CalyxMCPServerTests: XCTestCase {
                                          "result must contain capabilities")
         XCTAssertNotNil(capabilities["tools"],
                         "capabilities must include tools")
+
+        let instructions = result["instructions"] as? String
+        XCTAssertNotNil(instructions,
+                        "result must contain instructions")
+        XCTAssertFalse(instructions?.isEmpty ?? true,
+                       "instructions must not be empty")
     }
 
     // 5. "tools/list" → result with 7 tools
