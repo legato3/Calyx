@@ -83,15 +83,15 @@ A macOS 26+ native terminal application built on [libghostty](https://github.com
 ```bash
 # Clone with submodules
 git clone --recursive https://github.com/yuuichieguchi/Calyx.git
-cd calyx
+cd Calyx
 
-# Build libghostty
+# Build libghostty xcframework
 cd ghostty
-zig build -Doptimize=ReleaseFast
+zig build -Demit-xcframework=true -Dxcframework-target=native
 cd ..
 
 # Copy framework
-cp -R ghostty/zig-out/lib/GhosttyKit.xcframework .
+cp -R ghostty/macos/GhosttyKit.xcframework .
 
 # Generate Xcode project & build
 xcodegen generate
