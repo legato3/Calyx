@@ -107,10 +107,6 @@ final class SessionPersistenceTests: XCTestCase {
         XCTAssertTrue(group.isCollapsed, "isCollapsed should be true when explicitly set")
     }
 
-    /// currentSchemaVersion should be 3 for the v3 schema.
-    func test_v3_schema_version_is_3() {
-        XCTAssertEqual(SessionSnapshot.currentSchemaVersion, 3, "Schema version should be 3 after Phase 6 changes")
-    }
 
     /// A full encode-decode roundtrip should preserve both showSidebar and isCollapsed.
     func test_v3_roundtrip_preserves_showSidebar_and_isCollapsed() throws {
@@ -467,5 +463,107 @@ final class SessionPersistenceTests: XCTestCase {
 
         // Without a legacy file present, migration should return false
         XCTAssertFalse(didMigrate, "Migration should return false when no legacy file exists")
+    }
+
+    // MARK: - Schema v4 — WindowSnapshot gains sidebarWidth
+
+    /// currentSchemaVersion should be 4 for the v4 schema.
+    func test_v4_schema_version_is_4() {
+        XCTAssertEqual(SessionSnapshot.currentSchemaVersion, 4,
+                       "Schema version should be 4 after sidebarWidth addition")
+    }
+
+    /// A full encode-decode roundtrip should preserve sidebarWidth.
+    func test_v4_windowSnapshot_roundtrip_preserves_sidebarWidth() throws {
+        let window = WindowSnapshot(
+            id: UUID(),
+            frame: CGRect(x: 0, y: 0, width: 1200, height: 800),
+            groups: [],
+            activeGroupID: nil,
+            showSidebar: true,
+            sidebarWidth: 300
+        )
+
+        let data = try JSONEncoder().encode(window)
+        let decoded = try JSONDecoder().decode(WindowSnapshot.self, from: data)
+
+        XCTAssertEqual(decoded.sidebarWidth, 300, accuracy: 0.001,
+                       "sidebarWidth should survive encode-decode roundtrip")
+    }
+
+    /// v3 JSON without "sidebarWidth" key should decode with default value of 220.
+    func test_v3_json_decodes_with_default_sidebarWidth_220() throws {
+        let v3JSON = """
+        {
+            "schemaVersion": 3,
+            "windows": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000001",
+                    "frame": [[0, 0], [800, 600]],
+                    "groups": [],
+                    "activeGroupID": null,
+                    "showSidebar": true
+                }
+            ]
+        }
+        """
+        let data = Data(v3JSON.utf8)
+        let decoded = try JSONDecoder().decode(SessionSnapshot.self, from: data)
+
+        XCTAssertEqual(decoded.windows.count, 1)
+        XCTAssertEqual(decoded.windows[0].sidebarWidth, 220, accuracy: 0.001,
+                       "Missing sidebarWidth should default to 220 for v3 backward compat")
+    }
+
+    /// sidebarWidth values outside valid range [150, 500] should be clamped on decode.
+    func test_sidebarWidth_clamped_on_decode() throws {
+        // Helper to build a single-window JSON with a given sidebarWidth
+        func windowJSON(sidebarWidth: Int) -> String {
+            return """
+            {
+                "schemaVersion": 4,
+                "windows": [
+                    {
+                        "id": "00000000-0000-0000-0000-000000000001",
+                        "frame": [[0, 0], [800, 600]],
+                        "groups": [],
+                        "activeGroupID": null,
+                        "showSidebar": true,
+                        "sidebarWidth": \(sidebarWidth)
+                    }
+                ]
+            }
+            """
+        }
+
+        // 0 should be clamped to minSidebarWidth (150)
+        let zeroData = Data(windowJSON(sidebarWidth: 0).utf8)
+        let zeroDecoded = try JSONDecoder().decode(SessionSnapshot.self, from: zeroData)
+        XCTAssertEqual(zeroDecoded.windows[0].sidebarWidth, 150, accuracy: 0.001,
+                       "sidebarWidth of 0 should be clamped to 150")
+
+        // 9999 should be clamped to maxSidebarWidth (500)
+        let bigData = Data(windowJSON(sidebarWidth: 9999).utf8)
+        let bigDecoded = try JSONDecoder().decode(SessionSnapshot.self, from: bigData)
+        XCTAssertEqual(bigDecoded.windows[0].sidebarWidth, 500, accuracy: 0.001,
+                       "sidebarWidth of 9999 should be clamped to 500")
+
+        // -100 should be clamped to minSidebarWidth (150)
+        let negData = Data(windowJSON(sidebarWidth: -100).utf8)
+        let negDecoded = try JSONDecoder().decode(SessionSnapshot.self, from: negData)
+        XCTAssertEqual(negDecoded.windows[0].sidebarWidth, 150, accuracy: 0.001,
+                       "sidebarWidth of -100 should be clamped to 150")
+    }
+
+    /// WindowSession with sidebarWidth=350 should produce a snapshot with sidebarWidth=350.
+    @MainActor
+    func test_windowSession_snapshot_includes_sidebarWidth() {
+        let session = WindowSession(showSidebar: true)
+        session.sidebarWidth = 350
+
+        let snap = session.snapshot()
+
+        XCTAssertEqual(snap.sidebarWidth, 350, accuracy: 0.001,
+                       "Snapshot should capture sidebarWidth from WindowSession")
     }
 }

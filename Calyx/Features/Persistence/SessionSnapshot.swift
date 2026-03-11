@@ -6,7 +6,7 @@
 import Foundation
 
 struct SessionSnapshot: Codable, Equatable {
-    static let currentSchemaVersion = 3
+    static let currentSchemaVersion = 4
 
     let schemaVersion: Int
     let windows: [WindowSnapshot]
@@ -31,17 +31,19 @@ struct WindowSnapshot: Codable, Equatable {
     let groups: [TabGroupSnapshot]
     let activeGroupID: UUID?
     let showSidebar: Bool
+    let sidebarWidth: CGFloat
 
     private enum CodingKeys: String, CodingKey {
-        case id, frame, groups, activeGroupID, showSidebar
+        case id, frame, groups, activeGroupID, showSidebar, sidebarWidth
     }
 
-    init(id: UUID = UUID(), frame: CGRect = .zero, groups: [TabGroupSnapshot] = [], activeGroupID: UUID? = nil, showSidebar: Bool = true) {
+    init(id: UUID = UUID(), frame: CGRect = .zero, groups: [TabGroupSnapshot] = [], activeGroupID: UUID? = nil, showSidebar: Bool = true, sidebarWidth: CGFloat = 220) {
         self.id = id
         self.frame = frame
         self.groups = groups
         self.activeGroupID = activeGroupID
         self.showSidebar = showSidebar
+        self.sidebarWidth = sidebarWidth
     }
 
     init(from decoder: Decoder) throws {
@@ -51,6 +53,8 @@ struct WindowSnapshot: Codable, Equatable {
         groups = try container.decode([TabGroupSnapshot].self, forKey: .groups)
         activeGroupID = try container.decodeIfPresent(UUID.self, forKey: .activeGroupID)
         showSidebar = try container.decodeIfPresent(Bool.self, forKey: .showSidebar) ?? true
+        let rawWidth = try container.decodeIfPresent(CGFloat.self, forKey: .sidebarWidth) ?? 220
+        sidebarWidth = rawWidth.isFinite ? max(150, min(500, rawWidth)) : 220
     }
 
     func clampedToScreen(screenFrame: CGRect) -> WindowSnapshot {
@@ -63,7 +67,7 @@ struct WindowSnapshot: Codable, Equatable {
                 y: screenFrame.midY - h / 2,
                 width: w, height: h
             )
-            return WindowSnapshot(id: id, frame: centered, groups: groups, activeGroupID: activeGroupID, showSidebar: showSidebar)
+            return WindowSnapshot(id: id, frame: centered, groups: groups, activeGroupID: activeGroupID, showSidebar: showSidebar, sidebarWidth: sidebarWidth)
         }
 
         var f = frame
@@ -74,7 +78,7 @@ struct WindowSnapshot: Codable, Equatable {
         if f.origin.y < screenFrame.origin.y { f.origin.y = screenFrame.origin.y }
         if f.maxX > screenFrame.maxX { f.origin.x = screenFrame.maxX - f.width }
         if f.maxY > screenFrame.maxY { f.origin.y = screenFrame.maxY - f.height }
-        return WindowSnapshot(id: id, frame: f, groups: groups, activeGroupID: activeGroupID, showSidebar: showSidebar)
+        return WindowSnapshot(id: id, frame: f, groups: groups, activeGroupID: activeGroupID, showSidebar: showSidebar, sidebarWidth: sidebarWidth)
     }
 }
 
@@ -143,7 +147,8 @@ extension WindowSession {
             frame: .zero, // Frame is set by the caller from NSWindow
             groups: groups.map { $0.snapshot() },
             activeGroupID: activeGroupID,
-            showSidebar: showSidebar
+            showSidebar: showSidebar,
+            sidebarWidth: sidebarWidth
         )
     }
 }
@@ -211,7 +216,8 @@ extension WindowSession {
             id: snapshot.id,
             groups: groups,
             activeGroupID: snapshot.activeGroupID,
-            showSidebar: snapshot.showSidebar
+            showSidebar: snapshot.showSidebar,
+            sidebarWidth: snapshot.sidebarWidth
         )
     }
 }

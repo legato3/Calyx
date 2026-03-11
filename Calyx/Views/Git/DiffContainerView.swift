@@ -77,7 +77,7 @@ struct DiffToolbarView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
+        .background(Color(nsColor: .underPageBackgroundColor).opacity(0.1))
         .accessibilityIdentifier(AccessibilityID.Diff.toolbar)
     }
 

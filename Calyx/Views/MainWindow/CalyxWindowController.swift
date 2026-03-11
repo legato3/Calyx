@@ -294,7 +294,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             onCommitFileSelected: { [weak self] entry in self?.handleCommitFileSelected(entry) },
             onRefreshGitStatus: { [weak self] in self?.refreshGitStatus() },
             onLoadMoreCommits: { [weak self] in self?.loadMoreCommits() },
-            onExpandCommit: { [weak self] hash in self?.expandCommit(hash: hash) }
+            onExpandCommit: { [weak self] hash in self?.expandCommit(hash: hash) },
+            onSidebarWidthChanged: { [weak self] width in self?.windowSession.sidebarWidth = width },
+            onSidebarDragCommitted: { [weak self] in self?.requestSave() }
         )
     }
 
@@ -1071,7 +1073,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             frame: frame,
             groups: groups,
             activeGroupID: windowSession.activeGroupID,
-            showSidebar: windowSession.showSidebar
+            showSidebar: windowSession.showSidebar,
+            sidebarWidth: windowSession.sidebarWidth
         )
     }
 

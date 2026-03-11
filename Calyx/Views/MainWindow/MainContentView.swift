@@ -33,6 +33,8 @@ struct MainContentView: View {
     var onRefreshGitStatus: (() -> Void)?
     var onLoadMoreCommits: (() -> Void)?
     var onExpandCommit: ((String) -> Void)?
+    var onSidebarWidthChanged: ((CGFloat) -> Void)?
+    var onSidebarDragCommitted: (() -> Void)?
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @AppStorage("terminalGlassOpacity") private var glassOpacity = 0.7
@@ -65,12 +67,18 @@ struct MainContentView: View {
                         onLoadMoreCommits: onLoadMoreCommits,
                         onExpandCommit: onExpandCommit
                     )
-                    .frame(width: 220)
+                    .frame(width: windowSession.sidebarWidth)
                     .clipped(antialiased: false)
 
                     if reduceTransparency {
                         Divider()
                     }
+
+                    SidebarResizeHandle(
+                        currentWidth: windowSession.sidebarWidth,
+                        onWidthChanged: { onSidebarWidthChanged?($0) },
+                        onDragCommitted: { onSidebarDragCommitted?() }
+                    )
                 }
 
                 ZStack {

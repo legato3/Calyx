@@ -187,7 +187,7 @@ final class DiffLineNumberView: NSRulerView {
         let lineNumberColor = NSColor.secondaryLabelColor
 
         // Background
-        NSColor.controlBackgroundColor.withAlphaComponent(0.5).setFill()
+        NSColor.underPageBackgroundColor.withAlphaComponent(0.15).setFill()
         rect.fill()
 
         // Separator line
