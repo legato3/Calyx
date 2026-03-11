@@ -18,6 +18,10 @@ struct GitChangesView: View {
     var onLoadMore: (() -> Void)?
     var onExpandCommit: ((String) -> Void)?
 
+    @State private var isStagedExpanded = true
+    @State private var isUnstagedExpanded = true
+    @State private var isUntrackedExpanded = true
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -90,7 +94,7 @@ struct GitChangesView: View {
         if !staged.isEmpty || !unstaged.isEmpty || !untracked.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
                 if !staged.isEmpty {
-                    DisclosureGroup {
+                    DisclosureGroup(isExpanded: $isStagedExpanded) {
                         ForEach(staged) { entry in
                             GitFileRow(entry: entry)
                                 .onTapGesture { onWorkingFileSelected?(entry) }
@@ -105,12 +109,13 @@ struct GitChangesView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .contentShape(Rectangle())
+                        .onTapGesture { isStagedExpanded.toggle() }
                     }
                     .accessibilityIdentifier(AccessibilityID.Git.stagedSection)
                 }
 
                 if !unstaged.isEmpty {
-                    DisclosureGroup {
+                    DisclosureGroup(isExpanded: $isUnstagedExpanded) {
                         ForEach(unstaged) { entry in
                             GitFileRow(entry: entry)
                                 .onTapGesture { onWorkingFileSelected?(entry) }
@@ -125,12 +130,13 @@ struct GitChangesView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .contentShape(Rectangle())
+                        .onTapGesture { isUnstagedExpanded.toggle() }
                     }
                     .accessibilityIdentifier(AccessibilityID.Git.unstagedSection)
                 }
 
                 if !untracked.isEmpty {
-                    DisclosureGroup {
+                    DisclosureGroup(isExpanded: $isUntrackedExpanded) {
                         ForEach(untracked) { entry in
                             GitFileRow(entry: entry)
                                 .onTapGesture { onWorkingFileSelected?(entry) }
@@ -145,6 +151,7 @@ struct GitChangesView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .contentShape(Rectangle())
+                        .onTapGesture { isUntrackedExpanded.toggle() }
                     }
                     .accessibilityIdentifier(AccessibilityID.Git.untrackedSection)
                 }
