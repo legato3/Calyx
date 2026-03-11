@@ -104,6 +104,7 @@ struct GitChangesView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        .contentShape(Rectangle())
                     }
                     .accessibilityIdentifier(AccessibilityID.Git.stagedSection)
                 }
@@ -123,6 +124,7 @@ struct GitChangesView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        .contentShape(Rectangle())
                     }
                     .accessibilityIdentifier(AccessibilityID.Git.unstagedSection)
                 }
@@ -142,6 +144,7 @@ struct GitChangesView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        .contentShape(Rectangle())
                     }
                     .accessibilityIdentifier(AccessibilityID.Git.untrackedSection)
                 }

@@ -69,16 +69,19 @@ struct MainContentView: View {
                     )
                     .frame(width: windowSession.sidebarWidth)
                     .clipped(antialiased: false)
+                    .overlay(alignment: .trailing) {
+                        SidebarResizeHandle(
+                            currentWidth: windowSession.sidebarWidth,
+                            onWidthChanged: { onSidebarWidthChanged?($0) },
+                            onDragCommitted: { onSidebarDragCommitted?() }
+                        )
+                        .offset(x: 4)
+                        .zIndex(1)
+                    }
 
                     if reduceTransparency {
                         Divider()
                     }
-
-                    SidebarResizeHandle(
-                        currentWidth: windowSession.sidebarWidth,
-                        onWidthChanged: { onSidebarWidthChanged?($0) },
-                        onDragCommitted: { onSidebarDragCommitted?() }
-                    )
                 }
 
                 ZStack {

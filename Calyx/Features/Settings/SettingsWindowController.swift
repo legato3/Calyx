@@ -121,6 +121,8 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func opacityDidChange(_ sender: Any?) {
         updateOpacityLabel()
+        let opacity = max(0.1, min(1.0, opacitySlider.doubleValue))
+        UserDefaults.standard.set(opacity, forKey: "terminalGlassOpacity")
         fieldDidChange(sender)
     }
 
@@ -199,9 +201,12 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
             savePreset(nil)
             return !hasUnsavedChanges()
         case .alertSecondButtonReturn:
+            UserDefaults.standard.set(lastLoadedOpacity, forKey: "terminalGlassOpacity")
             loadPresetIntoUI()
             return true
         default:
+            UserDefaults.standard.set(lastLoadedOpacity, forKey: "terminalGlassOpacity")
+            loadPresetIntoUI()
             return false
         }
     }
