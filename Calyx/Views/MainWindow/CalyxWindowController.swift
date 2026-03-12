@@ -227,8 +227,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         contentView.addSubview(hosting)
         self.hostingView = hosting
 
-        // Add Liquid Glass effect behind the title bar
+        // Add Liquid Glass title bar
         let titleBarGlass = NSGlassEffectView()
+        titleBarGlass.cornerRadius = 0
         titleBarGlass.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(titleBarGlass)
         NSLayoutConstraint.activate([
