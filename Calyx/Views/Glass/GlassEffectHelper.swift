@@ -41,4 +41,15 @@ enum GlassEffectHelper {
             applyFallbackBackground(to: view, color: .windowBackgroundColor)
         }
     }
+
+    /// Tint opacity for sidebar/tab bar glass effect.
+    static func chromeTintOpacity(for glassOpacity: Double) -> Double {
+        glassOpacity * 0.5
+    }
+
+    /// Alpha value for title bar NSGlassEffectView.
+    /// Floor of 0.3 so the title bar never fully disappears.
+    static func titleBarAlpha(for glassOpacity: Double) -> Double {
+        max(0.3, min(1.0, glassOpacity / 0.7))
+    }
 }

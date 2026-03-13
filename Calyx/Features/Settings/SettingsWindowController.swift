@@ -53,11 +53,11 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
             root.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -24),
         ])
 
-        let title = NSTextField(labelWithString: "Terminal Glass")
+        let title = NSTextField(labelWithString: "Glass")
         title.font = .systemFont(ofSize: 20, weight: .semibold)
         root.addArrangedSubview(title)
 
-        let subtitle = NSTextField(labelWithString: "Controls the transparency of the terminal glass effect.")
+        let subtitle = NSTextField(labelWithString: "Controls the transparency of the glass effect.")
         subtitle.textColor = .secondaryLabelColor
         subtitle.font = .systemFont(ofSize: 13)
         root.addArrangedSubview(subtitle)
@@ -201,6 +201,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         updateOpacityLabel()
         let opacity = max(0.0, min(1.0, opacitySlider.doubleValue))
         UserDefaults.standard.set(opacity, forKey: "terminalGlassOpacity")
+        NotificationCenter.default.post(name: .glassOpacityDidChange, object: nil, userInfo: ["opacity": opacity])
         applyOpacityToRunningSurfaces()
         fieldDidChange(sender)
     }
@@ -247,6 +248,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private func savePresetFromUI() {
         let opacity = max(0.0, min(1.0, opacitySlider.doubleValue))
         UserDefaults.standard.set(opacity, forKey: "terminalGlassOpacity")
+        NotificationCenter.default.post(name: .glassOpacityDidChange, object: nil, userInfo: ["opacity": opacity])
         applyOpacityToRunningSurfaces()
     }
 
@@ -276,7 +278,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         let alert = NSAlert()
         alert.messageText = "Save changes before closing?"
-        alert.informativeText = "Your Terminal Glass settings have unsaved changes."
+        alert.informativeText = "Your Glass settings have unsaved changes."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Discard")
@@ -288,10 +290,12 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
             return !hasUnsavedChanges()
         case .alertSecondButtonReturn:
             UserDefaults.standard.set(lastLoadedOpacity, forKey: "terminalGlassOpacity")
+            NotificationCenter.default.post(name: .glassOpacityDidChange, object: nil, userInfo: ["opacity": lastLoadedOpacity])
             loadPresetIntoUI()
             return true
         default:
             UserDefaults.standard.set(lastLoadedOpacity, forKey: "terminalGlassOpacity")
+            NotificationCenter.default.post(name: .glassOpacityDidChange, object: nil, userInfo: ["opacity": lastLoadedOpacity])
             loadPresetIntoUI()
             return false
         }

@@ -105,12 +105,13 @@ private struct GlassButtonModifier: ViewModifier {
 
 private struct SidebarBackgroundModifier: ViewModifier {
     let reduceTransparency: Bool
+    @AppStorage("terminalGlassOpacity") private var glassOpacity = 0.7
 
     func body(content: Content) -> some View {
         if reduceTransparency {
             content.background(Color(nsColor: .controlBackgroundColor))
         } else {
-            content.glassEffect(.clear.tint(.black.opacity(0.25)), in: .rect)
+            content.glassEffect(.clear.tint(.black.opacity(GlassEffectHelper.chromeTintOpacity(for: glassOpacity))), in: .rect)
         }
     }
 }
