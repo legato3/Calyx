@@ -197,12 +197,12 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         commandRegistry.register(Command(id: "git.refresh", title: "Refresh Git Changes", category: "Git") { [weak self] in
             self?.refreshGitStatus()
         })
-        commandRegistry.register(Command(id: "ipc.enable", title: "Enable Claude Code IPC", category: "IPC", isAvailable: {
+        commandRegistry.register(Command(id: "ipc.enable", title: "Enable AI Agent IPC", category: "IPC", isAvailable: {
             !CalyxMCPServer.shared.isRunning
         }) { [weak self] in
             self?.enableIPC()
         })
-        commandRegistry.register(Command(id: "ipc.disable", title: "Disable Claude Code IPC", category: "IPC", isAvailable: {
+        commandRegistry.register(Command(id: "ipc.disable", title: "Disable AI Agent IPC", category: "IPC", isAvailable: {
             CalyxMCPServer.shared.isRunning
         }) { [weak self] in
             self?.disableIPC()
@@ -1420,17 +1420,21 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             try CalyxMCPServer.shared.start(token: token)
             let port = CalyxMCPServer.shared.port
 
-            // Write config - if this fails, stop server and roll back
-            do {
-                try ClaudeConfigManager.enableIPC(port: port, token: token)
-            } catch {
+            // Write config to all available agent tools
+            let result = IPCConfigManager.enableIPC(port: port, token: token)
+
+            if !result.anySucceeded {
                 CalyxMCPServer.shared.stop()
-                throw error
+                showIPCAlert(
+                    title: "IPC Error",
+                    message: "MCP server running on port \(port).\nNo agent configs found. Configure manually if needed."
+                )
+                return
             }
 
             showIPCAlert(
                 title: "IPC Enabled",
-                message: "MCP server running on port \(port).\nRestart Claude Code instances to connect."
+                message: "MCP server running on port \(port).\n\(configStatusMessage(result))\nRestart agent instances to connect."
             )
         } catch {
             showIPCAlert(title: "IPC Error", message: error.localizedDescription)
@@ -1439,12 +1443,28 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     private func disableIPC() {
         CalyxMCPServer.shared.stop()
-        do {
-            try ClaudeConfigManager.disableIPC()
-        } catch {
-            // Best-effort cleanup
+        let result = IPCConfigManager.disableIPC()
+        showIPCAlert(
+            title: "IPC Disabled",
+            message: "MCP server stopped.\n\(configStatusMessage(result))"
+        )
+    }
+
+    private func configStatusMessage(_ result: IPCConfigResult) -> String {
+        func label(_ status: ConfigStatus, name: String) -> String {
+            switch status {
+            case .success:
+                return "\(name): configured"
+            case .skipped(let reason):
+                return "\(name): \(reason) (skipped)"
+            case .failed(let error):
+                return "\(name): error - \(error.localizedDescription)"
+            }
         }
-        showIPCAlert(title: "IPC Disabled", message: "MCP server stopped and configuration removed.")
+        return [
+            label(result.claudeCode, name: "Claude Code"),
+            label(result.codex, name: "Codex")
+        ].joined(separator: "\n")
     }
 
     private func showIPCAlert(title: String, message: String) {

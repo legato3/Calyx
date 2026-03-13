@@ -10,7 +10,6 @@ import Foundation
 enum ClaudeConfigError: Error, LocalizedError {
     case invalidJSON
     case symlinkDetected
-    case writeFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -18,8 +17,6 @@ enum ClaudeConfigError: Error, LocalizedError {
             return "The config file contains invalid JSON"
         case .symlinkDetected:
             return "The config path is a symlink, which is not allowed for security reasons"
-        case .writeFailed(let reason):
-            return "Failed to write config file: \(reason)"
         }
     }
 }
@@ -37,7 +34,7 @@ struct ClaudeConfigManager: Sendable {
         let path = configPath ?? defaultConfigPath
 
         // Security: reject symlinks
-        guard !isSymlink(at: path) else {
+        guard !ConfigFileUtils.isSymlink(at: path) else {
             throw ClaudeConfigError.symlinkDetected
         }
 
@@ -57,6 +54,7 @@ struct ClaudeConfigManager: Sendable {
             // Create backup with the original content
             let bakPath = path + ".bak"
             try data.write(to: URL(fileURLWithPath: bakPath))
+            chmod(bakPath, 0o600)
 
             config = dict
         } else {
@@ -84,7 +82,7 @@ struct ClaudeConfigManager: Sendable {
         )
 
         // Atomic write with file locking
-        try atomicWrite(data: outputData, to: path)
+        try ConfigFileUtils.atomicWrite(data: outputData, to: path, lockPath: path + ".lock")
     }
 
     static func disableIPC(configPath: String? = nil) throws {
@@ -95,7 +93,7 @@ struct ClaudeConfigManager: Sendable {
         guard fm.fileExists(atPath: path) else { return }
 
         // Security: reject symlinks
-        guard !isSymlink(at: path) else {
+        guard !ConfigFileUtils.isSymlink(at: path) else {
             throw ClaudeConfigError.symlinkDetected
         }
 
@@ -128,7 +126,7 @@ struct ClaudeConfigManager: Sendable {
         )
 
         // Atomic write with file locking
-        try atomicWrite(data: outputData, to: path)
+        try ConfigFileUtils.atomicWrite(data: outputData, to: path, lockPath: path + ".lock")
     }
 
     static func isIPCEnabled(configPath: String? = nil) -> Bool {
@@ -153,41 +151,4 @@ struct ClaudeConfigManager: Sendable {
         NSHomeDirectory() + "/.claude.json"
     }
 
-    private static func isSymlink(at path: String) -> Bool {
-        var statBuf = stat()
-        guard lstat(path, &statBuf) == 0 else { return false }
-        return (statBuf.st_mode & S_IFMT) == S_IFLNK
-    }
-
-    private static func atomicWrite(data: Data, to path: String) throws {
-        let lockPath = path + ".lock"
-        let lockFd = open(lockPath, O_WRONLY | O_CREAT, 0o600)
-        guard lockFd >= 0 else {
-            throw ClaudeConfigError.writeFailed("Cannot create lock file")
-        }
-        defer {
-            flock(lockFd, LOCK_UN)
-            close(lockFd)
-        }
-
-        guard flock(lockFd, LOCK_EX) == 0 else {
-            throw ClaudeConfigError.writeFailed("Cannot acquire lock")
-        }
-
-        let tempPath = path + ".tmp"
-
-        // Write to temp file
-        try data.write(to: URL(fileURLWithPath: tempPath), options: .atomic)
-        // Set permissions to 0600 (owner read/write only)
-        chmod(tempPath, 0o600)
-
-        // Rename (atomic on same filesystem)
-        guard rename(tempPath, path) == 0 else {
-            try? FileManager.default.removeItem(atPath: tempPath)
-            throw ClaudeConfigError.writeFailed("Rename failed")
-        }
-
-        // Ensure final file has correct permissions
-        chmod(path, 0o600)
-    }
 }
