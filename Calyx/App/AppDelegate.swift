@@ -20,6 +20,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - NSApplicationDelegate
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Add CLI to PATH for terminals launched within Calyx
+        if let binPath = Bundle.main.resourceURL?.appendingPathComponent("bin").path {
+            let currentPath = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
+            setenv("PATH", "\(binPath):\(currentPath)", 1)
+        }
+
         let controller = GhosttyAppController.shared
         guard controller.readiness == .ready else {
             logger.critical("GhosttyAppController initialization failed")

@@ -225,6 +225,44 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }) { [weak self] in
             self?.disableBrowserScripting()
         })
+        commandRegistry.register(Command(id: "cli.install", title: "Install CLI to PATH", category: "System") {
+            let appPath = Bundle.main.bundlePath
+            let cliSource = "\(appPath)/Contents/Resources/bin/calyx"
+            let cliDest = "/usr/local/bin/calyx"
+
+            // Check if source exists
+            guard FileManager.default.fileExists(atPath: cliSource) else {
+                let alert = NSAlert()
+                alert.messageText = "CLI Not Found"
+                alert.informativeText = "CLI binary not found in app bundle. Please rebuild the app."
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+                return
+            }
+
+            // Use AppleScript to create symlink with admin privileges
+            let script = "do shell script \"ln -sf '\(cliSource)' '\(cliDest)'\" with administrator privileges"
+            var error: NSDictionary?
+            if let appleScript = NSAppleScript(source: script) {
+                appleScript.executeAndReturnError(&error)
+                if let error {
+                    let alert = NSAlert()
+                    alert.messageText = "Installation Failed"
+                    alert.informativeText = error[NSAppleScript.errorMessage] as? String ?? "Unknown error"
+                    alert.alertStyle = .warning
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                } else {
+                    let alert = NSAlert()
+                    alert.messageText = "CLI Installed"
+                    alert.informativeText = "The 'calyx' command is now available. Run 'calyx browser --help' to get started."
+                    alert.alertStyle = .informational
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                }
+            }
+        })
     }
 
     private func setupUI() {

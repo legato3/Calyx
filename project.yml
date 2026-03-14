@@ -45,6 +45,10 @@ targets:
           cp -R "${PROJECT_DIR}/Resources/ghostty" "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/ghostty"
           cp -R "${PROJECT_DIR}/Resources/terminfo" "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/terminfo"
         name: Copy Ghostty Resources
+      - script: |
+          mkdir -p "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/bin"
+          cp "${BUILT_PRODUCTS_DIR}/calyx" "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/bin/calyx"
+        name: Bundle CalyxCLI
     info:
       path: Calyx/Info.plist
       properties:
@@ -77,6 +81,7 @@ targets:
       - sdk: WebKit.framework
       - sdk: UserNotifications.framework
       - package: Sparkle
+      - target: CalyxCLI
 
   CalyxTests:
     type: bundle.unit-test
