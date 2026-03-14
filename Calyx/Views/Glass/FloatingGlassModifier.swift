@@ -8,7 +8,7 @@ import SwiftUI
 enum GlassTheme {
     static func chromeTintOpacity(for glassOpacity: Double) -> Double {
         let clamped = max(0.0, min(1.0, glassOpacity))
-        return 0.20 + (clamped * 0.30)
+        return 0.20 + (clamped * 0.80)
     }
 
     static func chromeTint(for glassOpacity: Double) -> Color {
