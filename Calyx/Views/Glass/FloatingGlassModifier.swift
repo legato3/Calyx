@@ -33,6 +33,7 @@ struct TabChromeModifier: ViewModifier {
     let isActive: Bool
     let cornerRadius: CGFloat
     let reduceTransparency: Bool
+    @Environment(\.controlActiveState) private var controlActiveState
 
     func body(content: Content) -> some View {
         if reduceTransparency {
@@ -47,8 +48,10 @@ struct TabChromeModifier: ViewModifier {
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .fill(Color.black.opacity(0.2))
                     )
+                    .opacity(controlActiveState == .key ? 1.0 : 0.5)
             } else {
                 content
+                    .opacity(controlActiveState == .key ? 1.0 : 0.5)
             }
         }
     }
