@@ -18,10 +18,6 @@ class BrowserToolHandler {
         self.broker = broker
     }
 
-    var isScriptingEnabled: Bool {
-        UserDefaults.standard.bool(forKey: "browserScriptingEnabled")
-    }
-
     static func isRestrictedForEval(url: String) -> Bool {
         let lowered = url.lowercased()
         let restrictedPaths = ["/login", "/auth", "/oauth", "/signin"]
@@ -33,13 +29,6 @@ class BrowserToolHandler {
     }
 
     func handleTool(name: String, arguments: [String: Any]?) async -> BrowserToolResult {
-        guard isScriptingEnabled else {
-            return BrowserToolResult(
-                text: "Browser scripting is not enabled. Enable it via Command Palette.",
-                isError: true
-            )
-        }
-
         switch name {
         case "browser_open":
             return await handleOpen(arguments)

@@ -215,16 +215,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }) { [weak self] in
             self?.disableIPC()
         })
-        commandRegistry.register(Command(id: "browser.enableScripting", title: "Enable Browser Scripting", category: "Browser", isAvailable: {
-            !UserDefaults.standard.bool(forKey: "browserScriptingEnabled")
-        }) { [weak self] in
-            self?.enableBrowserScripting()
-        })
-        commandRegistry.register(Command(id: "browser.disableScripting", title: "Disable Browser Scripting", category: "Browser", isAvailable: {
-            UserDefaults.standard.bool(forKey: "browserScriptingEnabled")
-        }) { [weak self] in
-            self?.disableBrowserScripting()
-        })
         commandRegistry.register(Command(id: "cli.install", title: "Install CLI to PATH", category: "System") {
             let appPath = Bundle.main.bundlePath
             let cliSource = "\(appPath)/Contents/Resources/bin/calyx"
@@ -1495,30 +1485,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             title: "IPC Disabled",
             message: "MCP server stopped.\n\(configStatusMessage(result))"
         )
-    }
-
-    // MARK: - Browser Scripting
-
-    private func enableBrowserScripting() {
-        let alert = NSAlert()
-        alert.messageText = "Enable Browser Scripting?"
-        alert.informativeText = "Browser automation allows MCP clients to control web pages. Only enable when using trusted agents."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Enable")
-        alert.addButton(withTitle: "Cancel")
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return }
-        UserDefaults.standard.set(true, forKey: "browserScriptingEnabled")
-    }
-
-    private func disableBrowserScripting() {
-        UserDefaults.standard.set(false, forKey: "browserScriptingEnabled")
-        let alert = NSAlert()
-        alert.messageText = "Browser Scripting Disabled"
-        alert.informativeText = "Browser automation tools are now disabled."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
     }
 
     private func configStatusMessage(_ result: IPCConfigResult) -> String {

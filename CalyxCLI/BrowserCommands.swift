@@ -17,8 +17,8 @@ struct BrowserList: ParsableCommand {
     )
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
-        let result = try client.callTool(name: "browser_list")
+        let client = try BrowserClient.fromStateFile()
+        let result = try client.call(command: "list")
         print(result)
     }
 }
@@ -35,8 +35,8 @@ struct BrowserOpen: ParsableCommand {
     var url: String
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
-        let result = try client.callTool(name: "browser_open", arguments: ["url": url])
+        let client = try BrowserClient.fromStateFile()
+        let result = try client.call(command: "open", args: ["url": url])
         print(result)
     }
 }
@@ -56,10 +56,10 @@ struct BrowserNavigate: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = ["url": url]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_navigate", arguments: args)
+        let result = try client.call(command: "navigate", args: args)
         print(result)
     }
 }
@@ -76,10 +76,10 @@ struct BrowserBack: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = [:]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_back", arguments: args)
+        let result = try client.call(command: "back", args: args)
         print(result)
     }
 }
@@ -96,10 +96,10 @@ struct BrowserForward: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = [:]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_forward", arguments: args)
+        let result = try client.call(command: "forward", args: args)
         print(result)
     }
 }
@@ -116,10 +116,10 @@ struct BrowserReload: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = [:]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_reload", arguments: args)
+        let result = try client.call(command: "reload", args: args)
         print(result)
     }
 }
@@ -136,10 +136,10 @@ struct BrowserSnapshot: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = [:]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_snapshot", arguments: args)
+        let result = try client.call(command: "snapshot", args: args)
         print(result)
     }
 }
@@ -156,10 +156,10 @@ struct BrowserScreenshot: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = [:]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_screenshot", arguments: args)
+        let result = try client.call(command: "screenshot", args: args)
         print(result)
     }
 }
@@ -179,10 +179,10 @@ struct BrowserClick: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = ["selector": selector]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_click", arguments: args)
+        let result = try client.call(command: "click", args: args)
         print(result)
     }
 }
@@ -205,10 +205,10 @@ struct BrowserFill: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = ["selector": selector, "value": value]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_fill", arguments: args)
+        let result = try client.call(command: "fill", args: args)
         print(result)
     }
 }
@@ -228,10 +228,10 @@ struct BrowserType: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = ["text": text]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_type", arguments: args)
+        let result = try client.call(command: "type", args: args)
         print(result)
     }
 }
@@ -251,10 +251,10 @@ struct BrowserPress: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = ["key": key]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_press", arguments: args)
+        let result = try client.call(command: "press", args: args)
         print(result)
     }
 }
@@ -277,10 +277,10 @@ struct BrowserSelect: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = ["selector": selector, "value": value]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_select", arguments: args)
+        let result = try client.call(command: "select", args: args)
         print(result)
     }
 }
@@ -300,10 +300,10 @@ struct BrowserCheck: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = ["selector": selector]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_check", arguments: args)
+        let result = try client.call(command: "check", args: args)
         print(result)
     }
 }
@@ -323,10 +323,10 @@ struct BrowserUncheck: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = ["selector": selector]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_uncheck", arguments: args)
+        let result = try client.call(command: "uncheck", args: args)
         print(result)
     }
 }
@@ -346,10 +346,10 @@ struct BrowserGetText: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = ["selector": selector]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_get_text", arguments: args)
+        let result = try client.call(command: "get_text", args: args)
         print(result)
     }
 }
@@ -369,10 +369,10 @@ struct BrowserGetHTML: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = ["selector": selector]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_get_html", arguments: args)
+        let result = try client.call(command: "get_html", args: args)
         print(result)
     }
 }
@@ -392,10 +392,10 @@ struct BrowserEval: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = ["code": code]
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_eval", arguments: args)
+        let result = try client.call(command: "eval", args: args)
         print(result)
     }
 }
@@ -424,14 +424,14 @@ struct BrowserWait: ParsableCommand {
     var tabId: String?
 
     func run() throws {
-        let client = try MCPClient.fromStateFile()
+        let client = try BrowserClient.fromStateFile()
         var args: [String: Any] = [:]
         if let selector { args["selector"] = selector }
         if let text { args["text"] = text }
         if let url { args["url"] = url }
         if let timeout { args["timeout"] = timeout }
         if let tabId { args["tab_id"] = tabId }
-        let result = try client.callTool(name: "browser_wait", arguments: args)
+        let result = try client.call(command: "wait", args: args)
         print(result)
     }
 }

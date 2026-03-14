@@ -49,12 +49,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         installKeyMonitor()
 
         browserTabBroker.appDelegate = self
-        CalyxMCPServer.shared.browserToolHandler = BrowserToolHandler(broker: browserTabBroker)
+        let browserHandler = BrowserToolHandler(broker: browserTabBroker)
+        BrowserServer.shared.toolHandler = browserHandler
+        BrowserServer.shared.start()
 
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
-        if isUITesting {
-            UserDefaults.standard.removeObject(forKey: "browserScriptingEnabled")
-        }
         if isUITesting || !restoreSession() {
             createNewWindow()
         }

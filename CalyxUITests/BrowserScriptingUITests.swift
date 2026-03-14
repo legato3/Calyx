@@ -45,19 +45,21 @@ final class BrowserScriptingUITests: CalyxUITestCase {
     }
 
     func test_mcpToolsWorkEndToEnd() {
-        // 1. Enable browser scripting
-        paletteRun("Browser Scripting", buttonTitle: "Enable")
+        // BrowserServer auto-starts, no enable step needed
 
-        // 2. Enable IPC
-        paletteRun("AI Agent IPC", buttonTitle: "OK")
-        Thread.sleep(forTimeInterval: 1)
-
-        // 3. Open browser tab
+        // 1. Open browser tab
         menuAction("File", item: "New Browser Tab")
         let dlg = app.dialogs.firstMatch
         XCTAssertTrue(dlg.waitForExistence(timeout: 5), "URL dialog missing")
         let tf = dlg.textFields.firstMatch
-        if tf.waitForExistence(timeout: 2) { tf.click(); tf.typeText("https://example.com") }
+        if tf.waitForExistence(timeout: 2) {
+            tf.click()
+            tf.typeKey("a", modifierFlags: .command) // select all
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString("https://example.com", forType: .string)
+            tf.typeKey("v", modifierFlags: .command) // paste
+        }
         dlg.buttons["Open"].click()
 
         let toolbar = app.descendants(matching: .any)
@@ -159,13 +161,4 @@ final class BrowserScriptingUITests: CalyxUITestCase {
         XCTAssertTrue(open.contains("tab_id"), "open should return tab_id, got: \(open)")
     }
 
-    func test_toolsBlockedWithoutScripting() {
-        // Only enable IPC, NOT scripting
-        paletteRun("AI Agent IPC", buttonTitle: "OK")
-        Thread.sleep(forTimeInterval: 1)
-
-        let result = terminalExec("calyx browser list")
-        XCTAssertTrue(result.contains("not enabled") || result.contains("Error"),
-                      "should be blocked without scripting: \(result)")
-    }
 }

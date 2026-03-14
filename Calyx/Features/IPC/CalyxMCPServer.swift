@@ -20,7 +20,6 @@ final class CalyxMCPServer {
     private(set) var port: Int = 0
     private(set) var token: String = ""
     let store = IPCStore()
-    var browserToolHandler: BrowserToolHandler?
 
     // MARK: - Private
 
@@ -71,7 +70,6 @@ final class CalyxMCPServer {
                 self.listener = nl
                 self.port = tryPort
                 self.isRunning = true
-                writeIPCStateFile()
                 return
             } catch {
                 lastError = error
@@ -90,39 +88,11 @@ final class CalyxMCPServer {
     }
 
     func stop() {
-        removeIPCStateFile()
         listener?.cancel()
         listener = nil
         isRunning = false
         port = 0
         Task { await store.cleanup() }
-    }
-
-    // MARK: - IPC State File
-
-    private func writeIPCStateFile() {
-        let configDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/calyx")
-        try? FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
-        let stateFile = configDir.appendingPathComponent("ipc.json")
-        let state: [String: Any] = [
-            "port": port,
-            "token": token,
-            "pid": ProcessInfo.processInfo.processIdentifier,
-        ]
-        if let data = try? JSONSerialization.data(withJSONObject: state, options: .prettyPrinted) {
-            try? data.write(to: stateFile)
-            try? FileManager.default.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: stateFile.path
-            )
-        }
-    }
-
-    private func removeIPCStateFile() {
-        let stateFile = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/calyx/ipc.json")
-        try? FileManager.default.removeItem(at: stateFile)
     }
 
     // MARK: - Connection Handling
@@ -272,12 +242,6 @@ final class CalyxMCPServer {
             return await handleGetPeerStatus(id: id, arguments: arguments)
 
         default:
-            if toolName.hasPrefix("browser_"), let handler = browserToolHandler {
-                let result = await handler.handleTool(name: toolName, arguments: arguments)
-                let content = [MCPContent(type: "text", text: result.text)]
-                let resp = MCPRouter.buildToolCallResponse(id: id, content: content, isError: result.isError)
-                return (200, encode(resp))
-            }
             return toolError(id: id, text: "Unknown tool: \(toolName)")
         }
     }

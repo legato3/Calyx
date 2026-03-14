@@ -6,7 +6,6 @@
 //
 //  Coverage:
 //  - isRestrictedForEval static method (auth URL detection)
-//  - handleTool when scripting is disabled
 //  - handleTool with unknown tool name
 //  - handleTool browser_list with no tabs (nil appDelegate)
 //  - BrowserToolResult struct construction
@@ -17,18 +16,6 @@ import XCTest
 
 @MainActor
 final class BrowserToolHandlerTests: XCTestCase {
-
-    // MARK: - Lifecycle
-
-    override func setUp() {
-        super.setUp()
-        UserDefaults.standard.removeObject(forKey: "browserScriptingEnabled")
-    }
-
-    override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: "browserScriptingEnabled")
-        super.tearDown()
-    }
 
     // MARK: - Helpers
 
@@ -123,52 +110,10 @@ final class BrowserToolHandlerTests: XCTestCase {
         )
     }
 
-    // ==================== handleTool: scripting disabled ====================
-
-    func test_should_return_error_when_scripting_disabled_for_browser_open() async {
-        // Given: scripting is explicitly disabled
-        UserDefaults.standard.set(false, forKey: "browserScriptingEnabled")
-        let sut = makeSUT()
-
-        // When: any tool is called
-        let result = await sut.handleTool(name: "browser_open", arguments: ["url": "https://example.com"])
-
-        // Then: returns error indicating scripting is not enabled
-        XCTAssertTrue(result.isError, "Should return error when scripting is disabled")
-        XCTAssertTrue(
-            result.text.lowercased().contains("not enabled") || result.text.lowercased().contains("disabled"),
-            "Error text should indicate scripting is not enabled, got: \(result.text)"
-        )
-    }
-
-    func test_should_return_error_when_scripting_disabled_for_browser_snapshot() async {
-        // Given: scripting key not set (defaults to false)
-        let sut = makeSUT()
-
-        // When: snapshot tool is called
-        let result = await sut.handleTool(name: "browser_snapshot", arguments: nil)
-
-        // Then: returns error
-        XCTAssertTrue(result.isError, "Should return error when scripting key is unset (defaults to false)")
-    }
-
-    func test_should_return_error_when_scripting_disabled_for_browser_eval() async {
-        // Given: scripting is disabled
-        UserDefaults.standard.set(false, forKey: "browserScriptingEnabled")
-        let sut = makeSUT()
-
-        // When: eval tool is called
-        let result = await sut.handleTool(name: "browser_eval", arguments: ["code": "1+1"])
-
-        // Then: returns error
-        XCTAssertTrue(result.isError, "Should return error when scripting is disabled for eval")
-    }
-
     // ==================== handleTool: unknown tool ====================
 
     func test_should_return_error_when_unknown_tool_name() async {
-        // Given: scripting is enabled
-        UserDefaults.standard.set(true, forKey: "browserScriptingEnabled")
+        // Given
         let sut = makeSUT()
 
         // When: unknown tool name is used
@@ -183,8 +128,7 @@ final class BrowserToolHandlerTests: XCTestCase {
     }
 
     func test_should_return_error_when_completely_invalid_tool_name() async {
-        // Given: scripting is enabled
-        UserDefaults.standard.set(true, forKey: "browserScriptingEnabled")
+        // Given
         let sut = makeSUT()
 
         // When: completely invalid tool name
@@ -197,8 +141,7 @@ final class BrowserToolHandlerTests: XCTestCase {
     // ==================== handleTool: browser_list with no tabs ====================
 
     func test_should_return_empty_list_when_browser_list_with_no_app_delegate() async {
-        // Given: scripting is enabled, broker has no appDelegate
-        UserDefaults.standard.set(true, forKey: "browserScriptingEnabled")
+        // Given: broker has no appDelegate
         let sut = makeSUT()
 
         // When: browser_list is called
@@ -232,28 +175,6 @@ final class BrowserToolHandlerTests: XCTestCase {
         let multiline = "line1\nline2\nline3"
         let result = BrowserToolResult(text: multiline, isError: false)
         XCTAssertEqual(result.text, multiline)
-    }
-
-    // ==================== isScriptingEnabled property ====================
-
-    func test_should_return_false_when_browserScriptingEnabled_not_set() {
-        let sut = makeSUT()
-        XCTAssertFalse(sut.isScriptingEnabled,
-                       "isScriptingEnabled should be false when UserDefaults key is not set")
-    }
-
-    func test_should_return_true_when_browserScriptingEnabled_is_true() {
-        UserDefaults.standard.set(true, forKey: "browserScriptingEnabled")
-        let sut = makeSUT()
-        XCTAssertTrue(sut.isScriptingEnabled,
-                      "isScriptingEnabled should be true when UserDefaults key is true")
-    }
-
-    func test_should_return_false_when_browserScriptingEnabled_is_false() {
-        UserDefaults.standard.set(false, forKey: "browserScriptingEnabled")
-        let sut = makeSUT()
-        XCTAssertFalse(sut.isScriptingEnabled,
-                       "isScriptingEnabled should be false when UserDefaults key is false")
     }
 
     // ==================== init ====================

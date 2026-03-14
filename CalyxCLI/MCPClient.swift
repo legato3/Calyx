@@ -2,19 +2,18 @@
 //  MCPClient.swift
 //  CalyxCLI
 //
-//  HTTP client that communicates with CalyxMCPServer via JSON-RPC.
+//  HTTP client that communicates directly with Calyx BrowserServer.
 //
 
 import Foundation
 
-struct MCPClient {
+struct BrowserClient {
     let port: Int
-    let token: String
 
-    /// Read connection info from ~/.config/calyx/ipc.json
-    static func fromStateFile() throws -> MCPClient {
+    /// Read connection info from ~/.config/calyx/browser.json
+    static func fromStateFile() throws -> BrowserClient {
         let stateFile = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/calyx/ipc.json")
+            .appendingPathComponent(".config/calyx/browser.json")
 
         guard FileManager.default.fileExists(atPath: stateFile.path) else {
             throw CLIError.notRunning
@@ -22,23 +21,17 @@ struct MCPClient {
 
         let data = try Data(contentsOf: stateFile)
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let port = json["port"] as? Int,
-              let token = json["token"] as? String else {
+              let port = json["port"] as? Int else {
             throw CLIError.invalidStateFile
         }
-        return MCPClient(port: port, token: token)
+        return BrowserClient(port: port)
     }
 
-    /// Send a tool call and return the text result.
-    func callTool(name: String, arguments: [String: Any] = [:]) throws -> String {
+    /// Send a browser command and return the result.
+    func call(command: String, args: [String: Any] = [:]) throws -> String {
         let requestBody: [String: Any] = [
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": [
-                "name": name,
-                "arguments": arguments,
-            ],
+            "command": command,
+            "args": args,
         ]
 
         let bodyData = try JSONSerialization.data(withJSONObject: requestBody)
@@ -51,10 +44,9 @@ struct MCPClient {
         proc.arguments = [
             "-s", "--connect-timeout", "5",
             "-X", "POST",
-            "-H", "Authorization: Bearer \(token)",
             "-H", "Content-Type: application/json",
             "-d", bodyStr,
-            "http://127.0.0.1:\(port)/mcp",
+            "http://127.0.0.1:\(port)/browser",
         ]
 
         let outPipe = Pipe()
@@ -71,21 +63,20 @@ struct MCPClient {
 
         let data = outPipe.fileHandleForReading.readDataToEndOfFile()
 
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let result = json["result"] as? [String: Any],
-              let content = result["content"] as? [[String: Any]],
-              let first = content.first,
-              let text = first["text"] as? String else {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             let raw = String(data: data, encoding: .utf8) ?? "(binary)"
             throw CLIError.connectionFailed("Invalid response: \(raw.prefix(500))")
         }
 
-        // Check if the tool returned an error
-        if let isError = result["isError"] as? Bool, isError {
-            throw CLIError.toolError(text)
+        if let ok = json["ok"] as? Bool, ok, let result = json["result"] as? String {
+            return result
         }
 
-        return text
+        if let error = json["error"] as? String {
+            throw CLIError.toolError(error)
+        }
+
+        throw CLIError.invalidResponse
     }
 }
 
@@ -99,9 +90,9 @@ enum CLIError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .notRunning:
-            return "Calyx is not running or IPC is not enabled. Start Calyx and enable IPC via Command Palette."
+            return "Calyx is not running. Start Calyx first."
         case .invalidStateFile:
-            return "Invalid IPC state file at ~/.config/calyx/ipc.json"
+            return "Invalid state file at ~/.config/calyx/browser.json"
         case .connectionFailed(let msg):
             return "Connection failed: \(msg)"
         case .invalidResponse:

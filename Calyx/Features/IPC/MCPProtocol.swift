@@ -343,33 +343,6 @@ struct MCPRouter: Sendable {
                     required: ["peer_id"]
                 )
             ),
-
-            // Browser — Navigation
-            MCPTool(name: "browser_open", description: "Open a new browser tab", inputSchema: schema(properties: ["url": prop("string", "URL to open")], required: ["url"])),
-            MCPTool(name: "browser_list", description: "List all browser tabs", inputSchema: schema(properties: [:])),
-            MCPTool(name: "browser_navigate", description: "Navigate to URL", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional, defaults to active)"), "url": prop("string", "URL to navigate to")], required: ["url"])),
-            MCPTool(name: "browser_back", description: "Go back", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)")], required: [])),
-            MCPTool(name: "browser_forward", description: "Go forward", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)")], required: [])),
-            MCPTool(name: "browser_reload", description: "Reload page", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)")], required: [])),
-
-            // Browser — Inspection
-            MCPTool(name: "browser_snapshot", description: "Get accessibility tree with element refs", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)")], required: [])),
-            MCPTool(name: "browser_screenshot", description: "Capture screenshot to temp file", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)")], required: [])),
-            MCPTool(name: "browser_get_text", description: "Get element text content", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)"), "selector": prop("string", "CSS selector or @ref")], required: ["selector"])),
-            MCPTool(name: "browser_get_html", description: "Get element HTML", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)"), "selector": prop("string", "CSS selector or @ref")], required: ["selector"])),
-            MCPTool(name: "browser_eval", description: "Execute JavaScript (requires scripting enabled)", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)"), "code": prop("string", "JavaScript code to execute")], required: ["code"])),
-
-            // Browser — Interaction
-            MCPTool(name: "browser_click", description: "Click element", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)"), "selector": prop("string", "CSS selector or @ref")], required: ["selector"])),
-            MCPTool(name: "browser_fill", description: "Fill input field", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)"), "selector": prop("string", "CSS selector or @ref"), "value": prop("string", "Value to fill")], required: ["selector", "value"])),
-            MCPTool(name: "browser_type", description: "Type text into focused element", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)"), "text": prop("string", "Text to type")], required: ["text"])),
-            MCPTool(name: "browser_press", description: "Press keyboard key", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)"), "key": prop("string", "Key to press (e.g. Enter, Tab)")], required: ["key"])),
-            MCPTool(name: "browser_select", description: "Select dropdown option", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)"), "selector": prop("string", "CSS selector or @ref"), "value": prop("string", "Option value")], required: ["selector", "value"])),
-            MCPTool(name: "browser_check", description: "Check checkbox", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)"), "selector": prop("string", "CSS selector or @ref")], required: ["selector"])),
-            MCPTool(name: "browser_uncheck", description: "Uncheck checkbox", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)"), "selector": prop("string", "CSS selector or @ref")], required: ["selector"])),
-
-            // Browser — Waiting
-            MCPTool(name: "browser_wait", description: "Wait for condition", inputSchema: schema(properties: ["tab_id": prop("string", "Tab ID (optional)"), "selector": prop("string", "CSS selector to wait for"), "text": prop("string", "Text to wait for"), "url": prop("string", "URL substring to wait for"), "timeout": prop("integer", "Timeout in ms (default 5000)")], required: [])),
         ]
     }
 

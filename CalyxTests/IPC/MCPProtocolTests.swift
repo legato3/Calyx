@@ -103,7 +103,7 @@ final class MCPProtocolTests: XCTestCase {
                      "nil instructions must remain nil after roundtrip")
     }
 
-    // ==================== 2. Tools List — All 26 Tools ====================
+    // ==================== 2. Tools List — All 7 Tools ====================
 
     func test_toolsListResponse_containsAllTools() throws {
         // Arrange
@@ -111,13 +111,6 @@ final class MCPProtocolTests: XCTestCase {
         let expectedToolNames: Set<String> = [
             "register_peer", "list_peers", "send_message",
             "broadcast", "receive_messages", "ack_messages", "get_peer_status",
-            "browser_open", "browser_list", "browser_navigate",
-            "browser_back", "browser_forward", "browser_reload",
-            "browser_snapshot", "browser_screenshot", "browser_get_text",
-            "browser_get_html", "browser_eval",
-            "browser_click", "browser_fill", "browser_type",
-            "browser_press", "browser_select", "browser_check",
-            "browser_uncheck", "browser_wait",
         ]
 
         // Act
@@ -135,9 +128,9 @@ final class MCPProtocolTests: XCTestCase {
 
         let actualNames = Set(toolsResult.tools.map(\.name))
         XCTAssertEqual(actualNames, expectedToolNames,
-                       "Tools list must contain exactly the 26 expected tools")
-        XCTAssertEqual(toolsResult.tools.count, 26,
-                       "Tools list must contain exactly 26 tools")
+                       "Tools list must contain exactly the 7 expected tools")
+        XCTAssertEqual(toolsResult.tools.count, 7,
+                       "Tools list must contain exactly 7 tools")
     }
 
     // ==================== 3. register_peer Schema ====================
@@ -396,13 +389,13 @@ final class MCPProtocolTests: XCTestCase {
 
     // ==================== Supplementary: MCPRouter.tools Static Property ====================
 
-    func test_router_tools_staticProperty_returns26Tools() {
+    func test_router_tools_staticProperty_returns7Tools() {
         // Act
         let tools = MCPRouter.tools
 
         // Assert
-        XCTAssertEqual(tools.count, 26,
-                       "MCPRouter.tools must expose exactly 26 tool definitions")
+        XCTAssertEqual(tools.count, 7,
+                       "MCPRouter.tools must expose exactly 7 tool definitions")
 
         let names = tools.map(\.name)
         // IPC tools
@@ -413,26 +406,6 @@ final class MCPProtocolTests: XCTestCase {
         XCTAssertTrue(names.contains("receive_messages"))
         XCTAssertTrue(names.contains("ack_messages"))
         XCTAssertTrue(names.contains("get_peer_status"))
-        // Browser tools
-        XCTAssertTrue(names.contains("browser_open"))
-        XCTAssertTrue(names.contains("browser_list"))
-        XCTAssertTrue(names.contains("browser_navigate"))
-        XCTAssertTrue(names.contains("browser_back"))
-        XCTAssertTrue(names.contains("browser_forward"))
-        XCTAssertTrue(names.contains("browser_reload"))
-        XCTAssertTrue(names.contains("browser_snapshot"))
-        XCTAssertTrue(names.contains("browser_screenshot"))
-        XCTAssertTrue(names.contains("browser_get_text"))
-        XCTAssertTrue(names.contains("browser_get_html"))
-        XCTAssertTrue(names.contains("browser_eval"))
-        XCTAssertTrue(names.contains("browser_click"))
-        XCTAssertTrue(names.contains("browser_fill"))
-        XCTAssertTrue(names.contains("browser_type"))
-        XCTAssertTrue(names.contains("browser_press"))
-        XCTAssertTrue(names.contains("browser_select"))
-        XCTAssertTrue(names.contains("browser_check"))
-        XCTAssertTrue(names.contains("browser_uncheck"))
-        XCTAssertTrue(names.contains("browser_wait"))
     }
 
     // ==================== Supplementary: AnyCodable Basics ====================
