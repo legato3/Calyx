@@ -239,7 +239,7 @@ private struct TabItemButton: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(tab.title)
+            Text(tab.title.isEmpty ? fallbackTitle : tab.title)
                 .lineLimit(1)
                 .font(.system(size: 12.5, weight: isActive ? .semibold : .medium, design: .rounded))
                 .tracking(0.18)
@@ -292,5 +292,12 @@ private struct TabItemButton: View {
         .onHover { isHovering = $0 }
         .accessibilityIdentifier(AccessibilityID.TabBar.tab(tab.id))
         .accessibilityLabel(tab.title)
+    }
+
+    private var fallbackTitle: String {
+        if case .browser(let url) = tab.content {
+            return url.host() ?? url.absoluteString
+        }
+        return "Terminal"
     }
 }

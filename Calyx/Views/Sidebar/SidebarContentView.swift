@@ -269,7 +269,7 @@ private struct TabRowItemView: View {
                 Image(systemName: tabIcon)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(tab.title)
+                Text(tab.title.isEmpty ? fallbackTitle : tab.title)
                     .lineLimit(1)
                     .font(.system(size: 12.5, weight: isActive ? .semibold : .medium, design: .rounded))
                 Spacer()
@@ -281,6 +281,7 @@ private struct TabRowItemView: View {
                         .background(Circle().fill(Color.red))
                 }
             }
+            .contentShape(Rectangle())
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .modifier(TabChromeModifier(
@@ -291,6 +292,13 @@ private struct TabRowItemView: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(AccessibilityID.Sidebar.tab(tab.id))
+    }
+
+    private var fallbackTitle: String {
+        if case .browser(let url) = tab.content {
+            return url.host() ?? url.absoluteString
+        }
+        return "Terminal"
     }
 }
 
