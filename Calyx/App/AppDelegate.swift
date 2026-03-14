@@ -10,7 +10,12 @@ private let logger = Logger(
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var appSession = AppSession()
+    private(set) var browserTabBroker = BrowserTabBroker()
     private var windowControllers: [CalyxWindowController] = []
+
+    var allWindowControllers: [CalyxWindowController] {
+        windowControllers
+    }
 
     // MARK: - NSApplicationDelegate
 
@@ -36,6 +41,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupMainMenu()
         registerNotificationObservers()
         installKeyMonitor()
+
+        browserTabBroker.appDelegate = self
+        CalyxMCPServer.shared.browserToolHandler = BrowserToolHandler(broker: browserTabBroker)
 
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
         if isUITesting || !restoreSession() {

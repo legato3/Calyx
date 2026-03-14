@@ -234,16 +234,23 @@ final class CalyxMCPServerTests: XCTestCase {
 
         let tools = try XCTUnwrap(result["tools"] as? [[String: Any]],
                                   "tools/list result must contain 'tools' array")
-        XCTAssertEqual(tools.count, 7,
-                       "tools/list must return exactly 7 tools")
+        XCTAssertEqual(tools.count, 26,
+                       "tools/list must return exactly 26 tools")
 
         let toolNames = Set(tools.compactMap { $0["name"] as? String })
         let expectedNames: Set<String> = [
             "register_peer", "list_peers", "send_message",
             "broadcast", "receive_messages", "ack_messages", "get_peer_status",
+            "browser_open", "browser_list", "browser_navigate",
+            "browser_back", "browser_forward", "browser_reload",
+            "browser_snapshot", "browser_screenshot", "browser_get_text",
+            "browser_get_html", "browser_eval",
+            "browser_click", "browser_fill", "browser_type",
+            "browser_press", "browser_select", "browser_check",
+            "browser_uncheck", "browser_wait",
         ]
         XCTAssertEqual(toolNames, expectedNames,
-                       "tools/list must return the 7 expected tool names")
+                       "tools/list must return the 26 expected tool names")
     }
 
     // 6. Unknown method → error code -32601

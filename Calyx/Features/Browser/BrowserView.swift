@@ -15,6 +15,7 @@ class BrowserView: NSView {
     private var redirectCounts: [ObjectIdentifier: Int] = [:]
     var onTitleChanged: ((String) -> Void)?
     var onURLChanged: ((URL) -> Void)?
+    var onNavigationCommit: (() -> Void)?
 
     init(state: BrowserState, downloadManager: DownloadManager = DownloadManager()) {
         self.state = state
@@ -47,6 +48,25 @@ class BrowserView: NSView {
     func goBack() { webView.goBack() }
     func goForward() { webView.goForward() }
     func reload() { webView.reload() }
+
+    func evaluateJavaScript(_ script: String) async throws -> String {
+        let result = try await webView.evaluateJavaScript(script)
+        if let str = result as? String {
+            return str
+        }
+        return String(describing: result)
+    }
+
+    func takeScreenshot() async throws -> Data {
+        let config = WKSnapshotConfiguration()
+        let image = try await webView.takeSnapshot(configuration: config)
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            throw BrowserAutomationError.screenshotFailed
+        }
+        return pngData
+    }
 }
 
 // MARK: - WKNavigationDelegate
@@ -117,6 +137,7 @@ extension BrowserView: WKNavigationDelegate {
             state.url = currentURL
             onURLChanged?(currentURL)
         }
+        onNavigationCommit?()
     }
 
     func webView(
