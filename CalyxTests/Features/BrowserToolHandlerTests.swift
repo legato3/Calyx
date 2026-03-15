@@ -185,4 +185,63 @@ final class BrowserToolHandlerTests: XCTestCase {
         XCTAssertTrue(sut.broker === broker,
                       "BrowserToolHandler should store the provided broker reference")
     }
+
+    // ==================== handleTool: new commands — missing params ====================
+
+    func test_should_return_error_when_get_attribute_missing_selector() async {
+        let sut = makeSUT()
+        let result = await sut.handleTool(name: "browser_get_attribute", arguments: ["attribute": "href"])
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.text.contains("selector"))
+    }
+
+    func test_should_return_error_when_get_attribute_missing_attribute() async {
+        let sut = makeSUT()
+        let result = await sut.handleTool(name: "browser_get_attribute", arguments: ["selector": "#el"])
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.text.lowercased().contains("missing") || result.text.lowercased().contains("required"))
+        XCTAssertTrue(result.text.contains("attribute"))
+    }
+
+    func test_should_return_error_when_is_visible_missing_selector() async {
+        let sut = makeSUT()
+        let result = await sut.handleTool(name: "browser_is_visible", arguments: nil)
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.text.contains("selector"))
+    }
+
+    func test_should_return_error_when_hover_missing_selector() async {
+        let sut = makeSUT()
+        let result = await sut.handleTool(name: "browser_hover", arguments: nil)
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.text.contains("selector"))
+    }
+
+    func test_should_return_error_when_scroll_missing_direction() async {
+        let sut = makeSUT()
+        let result = await sut.handleTool(name: "browser_scroll", arguments: nil)
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.text.contains("direction"))
+    }
+
+    func test_should_return_error_when_scroll_has_invalid_direction() async {
+        let sut = makeSUT()
+        let result = await sut.handleTool(name: "browser_scroll", arguments: ["direction": "diagonal"])
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.text.contains("direction"))
+    }
+
+    func test_should_return_error_when_scroll_has_zero_amount() async {
+        let sut = makeSUT()
+        let result = await sut.handleTool(name: "browser_scroll", arguments: ["direction": "down", "amount": 0])
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.text.contains("amount"))
+    }
+
+    func test_should_return_error_when_scroll_has_negative_amount() async {
+        let sut = makeSUT()
+        let result = await sut.handleTool(name: "browser_scroll", arguments: ["direction": "up", "amount": -1])
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.text.contains("amount"))
+    }
 }

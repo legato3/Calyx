@@ -687,6 +687,164 @@ final class BrowserAutomationTests: XCTestCase {
         XCTAssertTrue(js.contains("(() =>"), "Should produce valid IIFE despite newlines in value")
     }
 
+    // ==================== getAttribute() ====================
+
+    func test_getAttribute_contains_selector_and_attribute() {
+        let js = BrowserAutomation.getAttribute(selector: "#link", attribute: "href")
+        XCTAssertTrue(js.contains("#link"))
+        XCTAssertTrue(js.contains("href"))
+    }
+
+    func test_getAttribute_throws_when_element_not_found() {
+        let js = BrowserAutomation.getAttribute(selector: "#missing", attribute: "id")
+        XCTAssertTrue(js.contains("Element not found"))
+    }
+
+    func test_getAttribute_returns_null_for_missing_attribute() {
+        let js = BrowserAutomation.getAttribute(selector: "a", attribute: "data-x")
+        // getAttribute returns "null" string when attr is missing (not an error)
+        XCTAssertTrue(js.contains("getAttribute"))
+    }
+
+    func test_getAttribute_with_ref_selector() {
+        let js = BrowserAutomation.getAttribute(selector: "@e1", attribute: "class")
+        XCTAssertTrue(js.contains("data-calyx-ref"))
+    }
+
+    func test_getAttribute_wrapped_in_iife() {
+        let js = BrowserAutomation.getAttribute(selector: "a", attribute: "href")
+        XCTAssertTrue(js.contains("(() =>"))
+        XCTAssertTrue(js.contains("})()"))
+    }
+
+    // ==================== getLinks() ====================
+
+    func test_getLinks_queries_anchor_elements() {
+        let js = BrowserAutomation.getLinks()
+        XCTAssertTrue(js.contains("a[href]") || js.contains("querySelectorAll"))
+    }
+
+    func test_getLinks_uses_default_max_items() {
+        let js = BrowserAutomation.getLinks()
+        XCTAssertTrue(js.contains("100"))
+    }
+
+    func test_getLinks_uses_custom_max_items() {
+        let js = BrowserAutomation.getLinks(maxItems: 50)
+        XCTAssertTrue(js.contains("50"))
+    }
+
+    func test_getLinks_truncates_text() {
+        let js = BrowserAutomation.getLinks()
+        XCTAssertTrue(js.contains("200"))
+    }
+
+    func test_getLinks_wrapped_in_iife() {
+        let js = BrowserAutomation.getLinks()
+        XCTAssertTrue(js.contains("(() =>"))
+    }
+
+    // ==================== getInputs() ====================
+
+    func test_getInputs_queries_form_elements() {
+        let js = BrowserAutomation.getInputs()
+        XCTAssertTrue(js.contains("input") && js.contains("select") && js.contains("textarea"))
+    }
+
+    func test_getInputs_uses_default_max_items() {
+        let js = BrowserAutomation.getInputs()
+        XCTAssertTrue(js.contains("100"))
+    }
+
+    func test_getInputs_uses_custom_max_items() {
+        let js = BrowserAutomation.getInputs(maxItems: 25)
+        XCTAssertTrue(js.contains("25"))
+    }
+
+    func test_getInputs_truncates_values() {
+        let js = BrowserAutomation.getInputs()
+        XCTAssertTrue(js.contains("200"))
+    }
+
+    func test_getInputs_wrapped_in_iife() {
+        let js = BrowserAutomation.getInputs()
+        XCTAssertTrue(js.contains("(() =>"))
+    }
+
+    // ==================== isVisible() ====================
+
+    func test_isVisible_contains_selector() {
+        let js = BrowserAutomation.isVisible(selector: "#el")
+        XCTAssertTrue(js.contains("#el"))
+    }
+
+    func test_isVisible_returns_false_for_not_found() {
+        let js = BrowserAutomation.isVisible(selector: "#missing")
+        // isVisible should return "false" for not-found (not error)
+        XCTAssertTrue(js.contains("false"))
+    }
+
+    func test_isVisible_checks_visibility() {
+        let js = BrowserAutomation.isVisible(selector: "div")
+        XCTAssertTrue(js.contains("checkVisibility") || js.contains("display") || js.contains("visibility"))
+    }
+
+    func test_isVisible_wrapped_in_iife() {
+        let js = BrowserAutomation.isVisible(selector: "div")
+        XCTAssertTrue(js.contains("(() =>"))
+    }
+
+    // ==================== hover() ====================
+
+    func test_hover_contains_selector() {
+        let js = BrowserAutomation.hover(selector: "#link")
+        XCTAssertTrue(js.contains("#link"))
+    }
+
+    func test_hover_dispatches_pointer_events() {
+        let js = BrowserAutomation.hover(selector: "a")
+        XCTAssertTrue(js.contains("pointerover") || js.contains("PointerEvent"))
+        XCTAssertTrue(js.contains("pointerenter") || js.contains("PointerEvent"))
+    }
+
+    func test_hover_dispatches_mouse_events() {
+        let js = BrowserAutomation.hover(selector: "a")
+        XCTAssertTrue(js.contains("mouseover") || js.contains("MouseEvent"))
+        XCTAssertTrue(js.contains("mouseenter") || js.contains("MouseEvent"))
+    }
+
+    func test_hover_wrapped_in_iife() {
+        let js = BrowserAutomation.hover(selector: "a")
+        XCTAssertTrue(js.contains("(() =>"))
+    }
+
+    // ==================== scroll() ====================
+
+    func test_scroll_contains_direction() {
+        let js = BrowserAutomation.scroll(direction: "down", amount: 500)
+        XCTAssertTrue(js.contains("scrollBy"))
+    }
+
+    func test_scroll_uses_amount() {
+        let js = BrowserAutomation.scroll(direction: "down", amount: 300)
+        XCTAssertTrue(js.contains("300"))
+    }
+
+    func test_scroll_with_selector() {
+        let js = BrowserAutomation.scroll(direction: "down", amount: 500, selector: "#scrollbox")
+        XCTAssertTrue(js.contains("#scrollbox"))
+    }
+
+    func test_scroll_without_selector_targets_window() {
+        let js = BrowserAutomation.scroll(direction: "up", amount: 100)
+        XCTAssertTrue(js.contains("window") || js.contains("scrollBy"))
+    }
+
+    func test_scroll_wrapped_in_iife() {
+        let js = BrowserAutomation.scroll(direction: "down", amount: 500)
+        XCTAssertTrue(js.contains("(() =>"))
+    }
+
     // ==================== Cross-Method Consistency ====================
 
     func test_all_action_methods_produce_iife() {
@@ -703,6 +861,12 @@ final class BrowserAutomationTests: XCTestCase {
             ("eval", BrowserAutomation.eval(code: "1")),
             ("clearRefs", BrowserAutomation.clearRefs()),
             ("snapshot", BrowserAutomation.snapshot()),
+            ("getAttribute", BrowserAutomation.getAttribute(selector: "a", attribute: "href")),
+            ("getLinks", BrowserAutomation.getLinks()),
+            ("getInputs", BrowserAutomation.getInputs()),
+            ("isVisible", BrowserAutomation.isVisible(selector: "div")),
+            ("hover", BrowserAutomation.hover(selector: "a")),
+            ("scroll", BrowserAutomation.scroll(direction: "down", amount: 500)),
         ]
         for (name, js) in methods {
             XCTAssertTrue(js.contains("(() =>") || js.contains("(async () =>"),
@@ -719,6 +883,12 @@ final class BrowserAutomationTests: XCTestCase {
             ("eval", BrowserAutomation.eval(code: "1")),
             ("snapshot", BrowserAutomation.snapshot()),
             ("clearRefs", BrowserAutomation.clearRefs()),
+            ("getAttribute", BrowserAutomation.getAttribute(selector: "a", attribute: "href")),
+            ("getLinks", BrowserAutomation.getLinks()),
+            ("getInputs", BrowserAutomation.getInputs()),
+            ("isVisible", BrowserAutomation.isVisible(selector: "div")),
+            ("hover", BrowserAutomation.hover(selector: "a")),
+            ("scroll", BrowserAutomation.scroll(direction: "down", amount: 500)),
         ]
         for (name, js) in methods {
             XCTAssertTrue(js.contains("JSON.stringify"),

@@ -40,6 +40,12 @@ struct BrowserCommand: ParsableCommand {
             BrowserBack.self,
             BrowserForward.self,
             BrowserReload.self,
+            BrowserGetAttribute.self,
+            BrowserGetLinks.self,
+            BrowserGetInputs.self,
+            BrowserIsVisible.self,
+            BrowserHover.self,
+            BrowserScroll.self,
         ]
     )
 }

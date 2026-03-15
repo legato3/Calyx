@@ -254,6 +254,113 @@ enum BrowserAutomation {
         """)
     }
 
+    // MARK: - DOM Inspection
+
+    static func getAttribute(selector: String, attribute: String) -> String {
+        let sel = resolveSelector(selector)
+        let escapedSel = escapeJS(sel)
+        let escapedAttr = escapeJS(attribute)
+        return wrap("""
+        const el = document.querySelector('\(escapedSel)');
+        if (!el) throw new Error('Element not found: \(escapedSel)');
+        const val = el.getAttribute('\(escapedAttr)');
+        const result = val === null ? 'null' : val;
+        """)
+    }
+
+    static func getLinks(maxItems: Int = 100) -> String {
+        wrap("""
+        const els = Array.from(document.querySelectorAll('a[href]')).slice(0, \(maxItems));
+        const result = JSON.stringify(els.map(a => {
+            let text = (a.innerText || '').trim();
+            if (text.length > 200) text = text.substring(0, 200);
+            return { text, href: a.href };
+        }));
+        """)
+    }
+
+    static func getInputs(maxItems: Int = 100) -> String {
+        wrap("""
+        const els = Array.from(document.querySelectorAll('input, select, textarea')).slice(0, \(maxItems));
+        const result = JSON.stringify(els.map(el => {
+            let val = (el.value || '');
+            if (val.length > 200) val = val.substring(0, 200);
+            let ph = (el.placeholder || '');
+            if (ph.length > 200) ph = ph.substring(0, 200);
+            return {
+                tag: el.tagName.toLowerCase(),
+                type: el.type || '',
+                name: el.name || '',
+                id: el.id || '',
+                value: val,
+                placeholder: ph
+            };
+        }));
+        """)
+    }
+
+    static func isVisible(selector: String) -> String {
+        let sel = resolveSelector(selector)
+        let escaped = escapeJS(sel)
+        return wrap("""
+        const el = document.querySelector('\(escaped)');
+        let result;
+        if (!el) {
+            result = 'false';
+        } else if (typeof el.checkVisibility === 'function') {
+            result = el.checkVisibility() ? 'true' : 'false';
+        } else {
+            const s = getComputedStyle(el);
+            const r = el.getBoundingClientRect();
+            result = (s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0 && r.width > 0 && r.height > 0) ? 'true' : 'false';
+        }
+        """)
+    }
+
+    // MARK: - Interaction
+
+    static func hover(selector: String) -> String {
+        let sel = resolveSelector(selector)
+        let escaped = escapeJS(sel)
+        return wrap("""
+        const el = document.querySelector('\(escaped)');
+        if (!el) throw new Error('Element not found: \(escaped)');
+        el.dispatchEvent(new PointerEvent('pointerover', {bubbles: true}));
+        el.dispatchEvent(new PointerEvent('pointerenter', {bubbles: false}));
+        el.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+        el.dispatchEvent(new MouseEvent('mouseenter', {bubbles: false}));
+        const result = 'hovered';
+        """)
+    }
+
+    static func scroll(direction: String, amount: Int, selector: String? = nil) -> String {
+        let dx: String
+        let dy: String
+        switch direction {
+        case "up": dx = "0"; dy = "-\(amount)"
+        case "down": dx = "0"; dy = "\(amount)"
+        case "left": dx = "-\(amount)"; dy = "0"
+        case "right": dx = "\(amount)"; dy = "0"
+        default: preconditionFailure("Invalid direction '\(direction)' — handler must validate before calling")
+        }
+
+        if let selector {
+            let sel = resolveSelector(selector)
+            let escaped = escapeJS(sel)
+            return wrap("""
+            const el = document.querySelector('\(escaped)');
+            if (!el) throw new Error('Element not found: \(escaped)');
+            el.scrollBy(\(dx), \(dy));
+            const result = JSON.stringify({scrolled: true, target: 'element', x: el.scrollLeft, y: el.scrollTop});
+            """)
+        } else {
+            return wrap("""
+            window.scrollBy(\(dx), \(dy));
+            const result = JSON.stringify({scrolled: true, target: 'window', x: window.scrollX, y: window.scrollY});
+            """)
+        }
+    }
+
     // MARK: - Response Parsing
 
     static func parseResponse(_ jsonString: String) -> BrowserAutomationResponse {

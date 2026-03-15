@@ -435,3 +435,154 @@ struct BrowserWait: ParsableCommand {
         print(result)
     }
 }
+
+// MARK: - browser get-attribute
+
+struct BrowserGetAttribute: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "get-attribute",
+        abstract: "Get an attribute value from an element"
+    )
+
+    @Argument(help: "CSS selector")
+    var selector: String
+
+    @Argument(help: "Attribute name")
+    var attribute: String
+
+    @Option(name: .long, help: "Tab ID (uses active tab if omitted)")
+    var tabId: String?
+
+    func run() throws {
+        let client = try BrowserClient.fromStateFile()
+        var args: [String: Any] = ["selector": selector, "attribute": attribute]
+        if let tabId { args["tab_id"] = tabId }
+        let result = try client.call(command: "get_attribute", args: args)
+        print(result)
+    }
+}
+
+// MARK: - browser get-links
+
+struct BrowserGetLinks: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "get-links",
+        abstract: "Get all links on the page"
+    )
+
+    @Option(name: .long, help: "Maximum number of links (default: 100)")
+    var maxItems: Int?
+
+    @Option(name: .long, help: "Tab ID (uses active tab if omitted)")
+    var tabId: String?
+
+    func run() throws {
+        let client = try BrowserClient.fromStateFile()
+        var args: [String: Any] = [:]
+        if let maxItems { args["max_items"] = maxItems }
+        if let tabId { args["tab_id"] = tabId }
+        let result = try client.call(command: "get_links", args: args)
+        print(result)
+    }
+}
+
+// MARK: - browser get-inputs
+
+struct BrowserGetInputs: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "get-inputs",
+        abstract: "Get all form inputs on the page"
+    )
+
+    @Option(name: .long, help: "Maximum number of inputs (default: 100)")
+    var maxItems: Int?
+
+    @Option(name: .long, help: "Tab ID (uses active tab if omitted)")
+    var tabId: String?
+
+    func run() throws {
+        let client = try BrowserClient.fromStateFile()
+        var args: [String: Any] = [:]
+        if let maxItems { args["max_items"] = maxItems }
+        if let tabId { args["tab_id"] = tabId }
+        let result = try client.call(command: "get_inputs", args: args)
+        print(result)
+    }
+}
+
+// MARK: - browser is-visible
+
+struct BrowserIsVisible: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "is-visible",
+        abstract: "Check if an element is visible"
+    )
+
+    @Argument(help: "CSS selector")
+    var selector: String
+
+    @Option(name: .long, help: "Tab ID (uses active tab if omitted)")
+    var tabId: String?
+
+    func run() throws {
+        let client = try BrowserClient.fromStateFile()
+        var args: [String: Any] = ["selector": selector]
+        if let tabId { args["tab_id"] = tabId }
+        let result = try client.call(command: "is_visible", args: args)
+        print(result)
+    }
+}
+
+// MARK: - browser hover
+
+struct BrowserHover: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "hover",
+        abstract: "Hover over an element"
+    )
+
+    @Argument(help: "CSS selector")
+    var selector: String
+
+    @Option(name: .long, help: "Tab ID (uses active tab if omitted)")
+    var tabId: String?
+
+    func run() throws {
+        let client = try BrowserClient.fromStateFile()
+        var args: [String: Any] = ["selector": selector]
+        if let tabId { args["tab_id"] = tabId }
+        let result = try client.call(command: "hover", args: args)
+        print(result)
+    }
+}
+
+// MARK: - browser scroll
+
+struct BrowserScroll: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "scroll",
+        abstract: "Scroll the page or an element"
+    )
+
+    @Argument(help: "Direction: up, down, left, right")
+    var direction: String
+
+    @Option(name: .long, help: "Scroll amount in pixels (default: 500)")
+    var amount: Int?
+
+    @Option(name: .long, help: "CSS selector for element to scroll")
+    var selector: String?
+
+    @Option(name: .long, help: "Tab ID (uses active tab if omitted)")
+    var tabId: String?
+
+    func run() throws {
+        let client = try BrowserClient.fromStateFile()
+        var args: [String: Any] = ["direction": direction]
+        if let amount { args["amount"] = amount }
+        if let selector { args["selector"] = selector }
+        if let tabId { args["tab_id"] = tabId }
+        let result = try client.call(command: "scroll", args: args)
+        print(result)
+    }
+}

@@ -68,6 +68,18 @@ class BrowserToolHandler {
             return await handleUncheck(arguments)
         case "browser_wait":
             return await handleWait(arguments)
+        case "browser_get_attribute":
+            return await handleGetAttribute(arguments)
+        case "browser_get_links":
+            return await handleGetLinks(arguments)
+        case "browser_get_inputs":
+            return await handleGetInputs(arguments)
+        case "browser_is_visible":
+            return await handleIsVisible(arguments)
+        case "browser_hover":
+            return await handleHover(arguments)
+        case "browser_scroll":
+            return await handleScroll(arguments)
         default:
             return BrowserToolResult(text: "Unknown browser tool: \(name)", isError: true)
         }
@@ -336,6 +348,81 @@ class BrowserToolHandler {
         let resolved = resolveTab(arguments)
         guard let controller = resolved.controller else { return resolved.error! }
         let js = BrowserAutomation.wait(selector: selector, text: text, url: url, timeout: timeout)
+        return await runJS(controller, js)
+    }
+
+    private func handleGetAttribute(_ arguments: [String: Any]?) async -> BrowserToolResult {
+        guard let selector = arguments?["selector"] as? String else {
+            return BrowserToolResult(text: "Missing 'selector' parameter", isError: true)
+        }
+        guard let attribute = arguments?["attribute"] as? String else {
+            return BrowserToolResult(text: "Missing 'attribute' parameter", isError: true)
+        }
+        let resolved = resolveTab(arguments)
+        guard let controller = resolved.controller else { return resolved.error! }
+        let js = BrowserAutomation.getAttribute(selector: selector, attribute: attribute)
+        return await runJS(controller, js)
+    }
+
+    private func handleGetLinks(_ arguments: [String: Any]?) async -> BrowserToolResult {
+        let resolved = resolveTab(arguments)
+        guard let controller = resolved.controller else { return resolved.error! }
+        let maxItems = arguments?["max_items"] as? Int ?? 100
+        let js = BrowserAutomation.getLinks(maxItems: maxItems)
+        return await runJS(controller, js)
+    }
+
+    private func handleGetInputs(_ arguments: [String: Any]?) async -> BrowserToolResult {
+        let resolved = resolveTab(arguments)
+        guard let controller = resolved.controller else { return resolved.error! }
+        let maxItems = arguments?["max_items"] as? Int ?? 100
+        let js = BrowserAutomation.getInputs(maxItems: maxItems)
+        return await runJS(controller, js)
+    }
+
+    private func handleIsVisible(_ arguments: [String: Any]?) async -> BrowserToolResult {
+        guard let selector = arguments?["selector"] as? String else {
+            return BrowserToolResult(text: "Missing 'selector' parameter", isError: true)
+        }
+        let resolved = resolveTab(arguments)
+        guard let controller = resolved.controller else { return resolved.error! }
+        let js = BrowserAutomation.isVisible(selector: selector)
+        return await runJS(controller, js)
+    }
+
+    private func handleHover(_ arguments: [String: Any]?) async -> BrowserToolResult {
+        guard let selector = arguments?["selector"] as? String else {
+            return BrowserToolResult(text: "Missing 'selector' parameter", isError: true)
+        }
+        let resolved = resolveTab(arguments)
+        guard let controller = resolved.controller else { return resolved.error! }
+        if let restricted = checkAuthRestriction(controller) { return restricted }
+        let js = BrowserAutomation.hover(selector: selector)
+        return await runJS(controller, js)
+    }
+
+    private func handleScroll(_ arguments: [String: Any]?) async -> BrowserToolResult {
+        guard let direction = arguments?["direction"] as? String else {
+            return BrowserToolResult(text: "Missing 'direction' parameter", isError: true)
+        }
+        let validDirections = ["up", "down", "left", "right"]
+        guard validDirections.contains(direction) else {
+            return BrowserToolResult(text: "Invalid 'direction': must be one of up, down, left, right", isError: true)
+        }
+        let amount: Int
+        if let a = arguments?["amount"] as? Int {
+            guard a > 0 else {
+                return BrowserToolResult(text: "Invalid 'amount': must be greater than 0", isError: true)
+            }
+            amount = a
+        } else {
+            amount = 500
+        }
+        let resolved = resolveTab(arguments)
+        guard let controller = resolved.controller else { return resolved.error! }
+        if let restricted = checkAuthRestriction(controller) { return restricted }
+        let selector = arguments?["selector"] as? String
+        let js = BrowserAutomation.scroll(direction: direction, amount: amount, selector: selector)
         return await runJS(controller, js)
     }
 }
