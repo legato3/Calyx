@@ -92,11 +92,10 @@ codesign --force --sign "$SIGN_IDENTITY" --timestamp --options runtime \
   --entitlements Calyx/Calyx.entitlements "$APP_PATH"
 echo "Sparkle framework and app signed."
 
-# 3.5d. Pre-notarization verification gate
+# 3.5d. Pre-notarization verification gate (spctl skipped — requires notarization)
 echo "Verifying code signature..."
 codesign --verify --deep --strict "$APP_PATH"
-spctl --assess --type exec "$APP_PATH"
-echo "Signature verification passed."
+echo "Code signature verification passed."
 
 # 4. Zip for notarization
 echo "Creating zip for notarization..."
