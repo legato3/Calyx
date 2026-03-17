@@ -129,6 +129,17 @@ targets:
         product: ArgumentParser
 
 schemes:
+  Calyx:
+    build:
+      targets:
+        Calyx: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - CalyxTests
+        - CalyxUITests
   CalyxTests:
     build:
       targets:

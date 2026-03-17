@@ -207,4 +207,71 @@ final class GroupManagementUITests: CalyxUITestCase {
             "Original group name 'Group 2' should be preserved when submitting empty string"
         )
     }
+
+    // MARK: - Group Drag Reorder Tests
+
+    // MARK: - Group Collapse/Expand Tests
+
+    func test_collapseGroupHidesTabs() {
+        // Verify initial state: at least one tab is visible
+        let initialTabCount = countElements(matching: "calyx.sidebar.tab.")
+        XCTAssertGreaterThanOrEqual(
+            initialTabCount, 1,
+            "Should have at least one tab visible before collapsing"
+        )
+
+        // Find the collapse button for the group
+        let collapseButton = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "calyx.sidebar.groupCollapseButton."))
+            .firstMatch
+        XCTAssertTrue(
+            waitFor(collapseButton, timeout: 3),
+            "Group collapse button should exist"
+        )
+
+        // Act: click the collapse button
+        collapseButton.click()
+
+        // Wait for collapse animation
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Assert: all tabs should be hidden
+        let tabCountAfterCollapse = countElements(matching: "calyx.sidebar.tab.")
+        XCTAssertEqual(
+            tabCountAfterCollapse, 0,
+            "All tabs should be hidden after collapsing the group"
+        )
+    }
+
+    func test_expandGroupShowsTabs() {
+        // First, collapse the group
+        let collapseButton = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "calyx.sidebar.groupCollapseButton."))
+            .firstMatch
+        XCTAssertTrue(
+            waitFor(collapseButton, timeout: 3),
+            "Group collapse button should exist"
+        )
+
+        collapseButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Verify collapsed state: no tabs visible
+        let tabCountCollapsed = countElements(matching: "calyx.sidebar.tab.")
+        XCTAssertEqual(
+            tabCountCollapsed, 0,
+            "All tabs should be hidden after collapsing the group"
+        )
+
+        // Act: click the collapse button again to expand
+        collapseButton.click()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Assert: tabs should be visible again
+        let tabCountExpanded = countElements(matching: "calyx.sidebar.tab.")
+        XCTAssertGreaterThanOrEqual(
+            tabCountExpanded, 1,
+            "At least one tab should be visible after expanding the group"
+        )
+    }
 }

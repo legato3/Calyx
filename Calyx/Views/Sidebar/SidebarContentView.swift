@@ -20,6 +20,7 @@ struct SidebarContentView: View {
     var onNewGroup: (() -> Void)?
     var onCloseTab: ((UUID) -> Void)?
     var onGroupRenamed: (() -> Void)?
+    var onCollapseToggled: (() -> Void)?
     var onWorkingFileSelected: ((GitFileEntry) -> Void)?
     var onCommitFileSelected: ((CommitFileEntry) -> Void)?
     var onRefreshGitStatus: (() -> Void)?
@@ -43,7 +44,7 @@ struct SidebarContentView: View {
             if sidebarMode == .tabs {
                 ScrollView {
                     GlassEffectContainer(spacing: 8) {
-                        LazyVStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 8) {
                             ForEach(groups) { group in
                                 GroupSectionView(
                                     group: group,
@@ -53,7 +54,8 @@ struct SidebarContentView: View {
                                     onGroupSelected: onGroupSelected,
                                     onTabSelected: onTabSelected,
                                     onCloseTab: onCloseTab,
-                                    onGroupRenamed: onGroupRenamed
+                                    onGroupRenamed: onGroupRenamed,
+                                    onCollapseToggled: onCollapseToggled
                                 )
                             }
                         }
@@ -275,6 +277,7 @@ private struct GroupSectionView: View {
     var onTabSelected: ((UUID) -> Void)?
     var onCloseTab: ((UUID) -> Void)?
     var onGroupRenamed: (() -> Void)?
+    var onCollapseToggled: (() -> Void)?
 
     @State private var isEditing = false
 
@@ -313,31 +316,49 @@ private struct GroupSectionView: View {
                     groupColor: group.color
                 ))
             } else {
-                Button(action: { onGroupSelected?(group.id) }) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color(nsColor: group.color.nsColor))
-                            .frame(width: 8, height: 8)
-                        Text(group.name)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .tracking(0.4)
-                            .lineLimit(1)
-                        Spacer()
-                        Text("\(group.tabs.count)")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .foregroundStyle(.secondary)
+                HStack(spacing: 0) {
+                    // Left: group selection area
+                    Button(action: { onGroupSelected?(group.id) }) {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Color(nsColor: group.color.nsColor))
+                                .frame(width: 8, height: 8)
+                            Text(group.name)
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .tracking(0.4)
+                                .lineLimit(1)
+                            Spacer()
+                            Text("\(group.tabs.count)")
+                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .contentShape(Rectangle())
-                    .modifier(GroupHeaderBackgroundModifier(
-                        isActiveGroup: isActiveGroup,
-                        reduceTransparency: reduceTransparency,
-                        groupColor: group.color
-                    ))
+                    .buttonStyle(.plain)
+
+                    // Right: collapse toggle button
+                    Button(action: {
+                        group.isCollapsed.toggle()
+                        onCollapseToggled?()
+                    }) {
+                        Image(systemName: group.isCollapsed ? "chevron.right" : "chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier(AccessibilityID.Sidebar.groupCollapseButton(group.id))
                 }
-                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .modifier(GroupHeaderBackgroundModifier(
+                    isActiveGroup: isActiveGroup,
+                    reduceTransparency: reduceTransparency,
+                    groupColor: group.color
+                ))
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier(AccessibilityID.Sidebar.group(group.id))
                 .highPriorityGesture(TapGesture(count: 2).onEnded { isEditing = true })
             }

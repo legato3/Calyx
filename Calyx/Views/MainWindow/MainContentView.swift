@@ -35,6 +35,7 @@ struct MainContentView: View {
     var onLoadMoreCommits: (() -> Void)?
     var onExpandCommit: ((String) -> Void)?
     var onSidebarWidthChanged: ((CGFloat) -> Void)?
+    var onCollapseToggled: (() -> Void)?
     var onSidebarDragCommitted: (() -> Void)?
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -63,6 +64,7 @@ struct MainContentView: View {
                         onNewGroup: onNewGroup,
                         onCloseTab: onCloseTab,
                         onGroupRenamed: onGroupRenamed,
+                        onCollapseToggled: onCollapseToggled,
                         onWorkingFileSelected: onWorkingFileSelected,
                         onCommitFileSelected: onCommitFileSelected,
                         onRefreshGitStatus: onRefreshGitStatus,

@@ -351,6 +351,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             onLoadMoreCommits: { [weak self] in self?.loadMoreCommits() },
             onExpandCommit: { [weak self] hash in self?.expandCommit(hash: hash) },
             onSidebarWidthChanged: { [weak self] width in self?.windowSession.sidebarWidth = width },
+            onCollapseToggled: { [weak self] in self?.requestSave() },
             onSidebarDragCommitted: { [weak self] in self?.requestSave() }
         )
     }
