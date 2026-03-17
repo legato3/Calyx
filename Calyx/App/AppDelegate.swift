@@ -282,6 +282,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         prevTabItem.keyEquivalentModifierMask = [.command, .shift]
         windowMenu.addItem(prevTabItem)
 
+        let jumpUnreadItem = NSMenuItem(title: "Jump to Unread Tab", action: #selector(CalyxWindowController.jumpToMostRecentUnreadTab), keyEquivalent: "u")
+        jumpUnreadItem.keyEquivalentModifierMask = [.command, .shift]
+        windowMenu.addItem(jumpUnreadItem)
+
         windowMenu.addItem(.separator())
 
         // Cmd+1-9 tab selection
@@ -492,6 +496,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if let wc = self?.windowControllers.first(where: { $0.window?.isKeyWindow == true }) {
                     wc.toggleCommandPalette()
                     return nil // consume the event
+                }
+            }
+
+            if mods == [.command, .shift],
+               event.charactersIgnoringModifiers?.lowercased() == "u" {
+                if let wc = self?.windowControllers.first(where: { $0.window?.isKeyWindow == true }) {
+                    wc.jumpToMostRecentUnreadTab()
+                    return nil
                 }
             }
 

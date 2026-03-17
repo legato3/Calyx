@@ -253,6 +253,12 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 }
             }
         })
+        commandRegistry.register(Command(id: "tab.jumpToUnread", title: "Jump to Unread Tab", shortcut: "Cmd+Shift+U", category: "Tabs", isAvailable: { [weak self] in
+            guard let self else { return false }
+            return self.windowSession.groups.flatMap(\.tabs).contains { $0.unreadNotifications > 0 }
+        }) { [weak self] in
+            self?.jumpToMostRecentUnreadTab()
+        })
     }
 
     private func setupUI() {
@@ -390,7 +396,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         tab.registry.controller(for: focusedID)?.setFocus(true)
         tab.registry.controller(for: focusedID)?.refresh()
         focusView.needsDisplay = true
-        tab.unreadNotifications = 0
+        tab.clearUnreadNotifications()
         return true
     }
 
@@ -759,7 +765,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             tab.registry.controller(for: focusedID)?.setFocus(true)
             tab.registry.controller(for: focusedID)?.refresh()
             focusView.needsDisplay = true
-            activeTab?.unreadNotifications = 0
+            activeTab?.clearUnreadNotifications()
         }
     }
 
@@ -1021,6 +1027,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         let isFirstUnread = owningTab.unreadNotifications == 0
         owningTab.unreadNotifications += 1
+        owningTab.lastNotificationTime = Date()
 
         NotificationManager.shared.sendNotification(title: title, body: body, tabID: owningTab.id)
 
@@ -1040,6 +1047,36 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     // MARK: - Menu Actions
+
+    @objc func jumpToMostRecentUnreadTab() {
+        var mostRecentTab: Tab?
+        var mostRecentTime: Date?
+
+        for group in windowSession.groups {
+            for tab in group.tabs {
+                guard tab.unreadNotifications > 0,
+                      let time = tab.lastNotificationTime else { continue }
+                if mostRecentTime == nil || time > mostRecentTime! {
+                    mostRecentTab = tab
+                    mostRecentTime = time
+                }
+            }
+        }
+
+        guard let target = mostRecentTab else {
+            NSSound.beep()
+            return
+        }
+
+        switchToTab(id: target.id)
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(jumpToMostRecentUnreadTab) {
+            return windowSession.groups.flatMap(\.tabs).contains { $0.unreadNotifications > 0 }
+        }
+        return true
+    }
 
     @objc func newTab(_ sender: Any?) {
         createNewTab()

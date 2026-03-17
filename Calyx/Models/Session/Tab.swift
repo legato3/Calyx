@@ -19,6 +19,7 @@ class Tab: Identifiable {
     var splitTree: SplitTree
     var content: TabContent
     var unreadNotifications: Int = 0
+    var lastNotificationTime: Date?
     let registry: SurfaceRegistry
 
     init(
@@ -35,5 +36,10 @@ class Tab: Identifiable {
         self.splitTree = splitTree
         self.content = content
         self.registry = registry
+    }
+
+    func clearUnreadNotifications() {
+        unreadNotifications = 0
+        lastNotificationTime = nil
     }
 }
