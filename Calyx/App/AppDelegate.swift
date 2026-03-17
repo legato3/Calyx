@@ -181,7 +181,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let appMenu = NSMenu()
         appMenuItem.submenu = appMenu
 
-        appMenu.addItem(withTitle: "About Calyx", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "About Calyx", action: #selector(showAboutPanel), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Preferences…", action: #selector(openPreferences(_:)), keyEquivalent: ",")
         if !UpdateController.shared.isHomebrew {
@@ -670,6 +670,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         debugLog("Debug select complete")
+    }
+
+    @objc private func showAboutPanel() {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationVersion: "Version \(version)"
+        ])
     }
 
     @objc private func openPreferences(_ sender: Any?) {
