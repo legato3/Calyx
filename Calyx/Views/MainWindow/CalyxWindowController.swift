@@ -1669,20 +1669,22 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         let payload = store.formatForSubmission(filePath: filePath)
 
         // Find terminal tabs running Claude Code (title contains "claude")
-        let claudeTabs = windowSession.groups.flatMap(\.tabs).filter {
+        let agentTabs = windowSession.groups.flatMap(\.tabs).filter {
             guard case .terminal = $0.content else { return false }
-            return $0.title.localizedCaseInsensitiveContains("claude")
+            let title = $0.title
+            return title.localizedCaseInsensitiveContains("claude") ||
+                   title.localizedCaseInsensitiveContains("codex")
         }
 
-        guard !claudeTabs.isEmpty else {
-            showIPCAlert(title: "No Claude Code", message: "No terminal tabs running Claude Code found. Start Claude Code first.")
+        guard !agentTabs.isEmpty else {
+            showIPCAlert(title: "No AI Agent", message: "No terminal tabs running Claude Code or Codex found. Start an AI agent first.")
             return
         }
 
         // Select target tab
         let targetTab: Tab
-        if claudeTabs.count == 1 {
-            targetTab = claudeTabs[0]
+        if agentTabs.count == 1 {
+            targetTab = agentTabs[0]
         } else {
             let alert = NSAlert()
             alert.messageText = "Select Claude Code Tab"
@@ -1691,7 +1693,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             alert.addButton(withTitle: "Cancel")
 
             let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-            for (i, tab) in claudeTabs.enumerated() {
+            for (i, tab) in agentTabs.enumerated() {
                 let groupName = windowSession.groups.first { $0.tabs.contains { $0.id == tab.id } }?.name ?? ""
                 let label = "\(tab.title) — \(groupName) (#\(i + 1))"
                 popup.addItem(withTitle: label)
@@ -1702,8 +1704,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             guard response == .alertFirstButtonReturn else { return }
 
             let selectedIndex = popup.indexOfSelectedItem
-            guard selectedIndex >= 0, selectedIndex < claudeTabs.count else { return }
-            targetTab = claudeTabs[selectedIndex]
+            guard selectedIndex >= 0, selectedIndex < agentTabs.count else { return }
+            targetTab = agentTabs[selectedIndex]
         }
 
         // Send review text to terminal PTY via ghostty surface
