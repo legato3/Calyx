@@ -1714,9 +1714,19 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
 
         controller.sendText(payload)
-        // Send Enter separately so it's not consumed by bracketed paste mode
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            controller.sendText("\r")
+        // Send Enter as a key event (not text) so bracketed paste doesn't swallow it
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            var keyEvent = ghostty_input_key_s()
+            keyEvent.action = GHOSTTY_ACTION_PRESS
+            keyEvent.keycode = 0x24 // macOS keycode for Return/Enter
+            keyEvent.mods = GHOSTTY_MODS_NONE
+            keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+            keyEvent.text = nil
+            keyEvent.unshifted_codepoint = 0
+            keyEvent.composing = false
+            controller.sendKey(keyEvent)
+            keyEvent.action = GHOSTTY_ACTION_RELEASE
+            controller.sendKey(keyEvent)
         }
 
         // Switch to the target terminal tab
