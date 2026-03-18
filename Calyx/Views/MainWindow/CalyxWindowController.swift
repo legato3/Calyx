@@ -1668,30 +1668,30 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         let payload = store.formatForSubmission(filePath: filePath)
 
-        // Find terminal tabs to send review to
-        let terminalTabs = windowSession.groups.flatMap(\.tabs).filter {
-            if case .terminal = $0.content { return true }
-            return false
+        // Find terminal tabs running Claude Code (title contains "claude")
+        let claudeTabs = windowSession.groups.flatMap(\.tabs).filter {
+            guard case .terminal = $0.content else { return false }
+            return $0.title.localizedCaseInsensitiveContains("claude")
         }
 
-        guard !terminalTabs.isEmpty else {
-            showIPCAlert(title: "No Terminal", message: "No terminal tabs available to send review to.")
+        guard !claudeTabs.isEmpty else {
+            showIPCAlert(title: "No Claude Code", message: "No terminal tabs running Claude Code found. Start Claude Code first.")
             return
         }
 
-        // Select target terminal tab
+        // Select target tab
         let targetTab: Tab
-        if terminalTabs.count == 1 {
-            targetTab = terminalTabs[0]
+        if claudeTabs.count == 1 {
+            targetTab = claudeTabs[0]
         } else {
             let alert = NSAlert()
-            alert.messageText = "Select Terminal Tab"
-            alert.informativeText = "Choose which terminal tab to send the review to:"
+            alert.messageText = "Select Claude Code Tab"
+            alert.informativeText = "Choose which Claude Code instance to send the review to:"
             alert.addButton(withTitle: "Send")
             alert.addButton(withTitle: "Cancel")
 
             let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-            for tab in terminalTabs {
+            for tab in claudeTabs {
                 popup.addItem(withTitle: tab.title)
             }
             alert.accessoryView = popup
@@ -1700,8 +1700,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             guard response == .alertFirstButtonReturn else { return }
 
             let selectedIndex = popup.indexOfSelectedItem
-            guard selectedIndex >= 0, selectedIndex < terminalTabs.count else { return }
-            targetTab = terminalTabs[selectedIndex]
+            guard selectedIndex >= 0, selectedIndex < claudeTabs.count else { return }
+            targetTab = claudeTabs[selectedIndex]
         }
 
         // Send review text to terminal PTY via ghostty surface
