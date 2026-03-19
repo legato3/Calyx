@@ -70,14 +70,17 @@ targets:
               default: Open in Calyx
             NSMessage: openInCalyx
             NSPortName: Calyx
+            NSRequiredContext:
+              NSTextContent: FilePath
             NSSendTypes:
               - NSFilenamesPboardType
+              - public.plain-text
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.calyx.terminal
         PRODUCT_NAME: Calyx
-        MARKETING_VERSION: "0.13.1"
-        CURRENT_PROJECT_VERSION: 10
+        MARKETING_VERSION: "0.13.2"
+        CURRENT_PROJECT_VERSION: 11
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
         CODE_SIGN_ENTITLEMENTS: Calyx/Calyx.entitlements
         CODE_SIGN_STYLE: Automatic
