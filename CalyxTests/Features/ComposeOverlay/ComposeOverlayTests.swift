@@ -38,6 +38,7 @@ final class ComposeOverlayViewTests: XCTestCase {
         var receivedText: String?
         sut.onSend = { text in
             receivedText = text
+            return true
         }
 
         // Simulate typing "hello" into the internal text view
@@ -59,6 +60,7 @@ final class ComposeOverlayViewTests: XCTestCase {
         var sendCalled = false
         sut.onSend = { _ in
             sendCalled = true
+            return true
         }
 
         sut.textView.string = "line1"
@@ -96,7 +98,7 @@ final class ComposeOverlayViewTests: XCTestCase {
     func test_should_clear_text_after_send() {
         // Arrange
         let sut = makeSUT()
-        sut.onSend = { _ in }
+        sut.onSend = { _ in true }
         sut.textView.string = "hello"
 
         // Act
@@ -115,6 +117,7 @@ final class ComposeOverlayViewTests: XCTestCase {
         var sendCalled = false
         sut.onSend = { _ in
             sendCalled = true
+            return true
         }
 
         // Leave text empty (default state)

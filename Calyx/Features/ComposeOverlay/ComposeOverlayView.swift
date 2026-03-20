@@ -23,7 +23,9 @@ private class ComposeTextView: NSTextView {
         onMarkedTextChanged?()
     }
 
-
+    override func accessibilityValue() -> String? {
+        string
+    }
 }
 
 @MainActor
@@ -60,8 +62,7 @@ class ComposeOverlayView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard window != nil else { return }
-        window?.makeFirstResponder(textView)
+        focusTextView()
     }
 
     // MARK: - Setup
@@ -127,6 +128,11 @@ class ComposeOverlayView: NSView {
         setAccessibilityIdentifier(AccessibilityID.Compose.container)
         textView.setAccessibilityIdentifier(AccessibilityID.Compose.textView)
         placeholderLabel.setAccessibilityIdentifier(AccessibilityID.Compose.placeholder)
+    }
+
+    func focusTextView() {
+        guard window != nil else { return }
+        window?.makeFirstResponder(textView)
     }
 
     // MARK: - Key Handling (overrides on the view itself for when textView doesn't handle)
