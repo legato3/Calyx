@@ -76,6 +76,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if ProcessInfo.processInfo.arguments.contains("--uitesting") {
+            return .terminateNow
+        }
         guard let app = GhosttyAppController.shared.app else {
             return .terminateNow
         }
@@ -564,6 +567,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Enable the global CGEvent tap if ghostty has global keybindings configured.
     /// This allows keybindings like quick terminal toggle to work from any app.
     private func installGlobalEventTap() {
+        if ProcessInfo.processInfo.arguments.contains("--uitesting") { return }
         guard let app = GhosttyAppController.shared.app else {
             logger.warning("installGlobalEventTap: no ghostty app available")
             return

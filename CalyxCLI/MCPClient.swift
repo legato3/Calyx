@@ -42,7 +42,7 @@ struct BrowserClient {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
         proc.arguments = [
-            "-s", "--connect-timeout", "5",
+            "-s", "--connect-timeout", "5", "--max-time", "30",
             "-X", "POST",
             "-H", "Content-Type: application/json",
             "-d", bodyStr,
