@@ -6,9 +6,9 @@ A macOS 26+ native terminal application built on [libghostty](https://github.com
 
 ## Features
 
-- **libghostty terminal engine** -- Metal GPU-accelerated rendering via Ghostty v1.3.0 submodule
+- **libghostty terminal engine** -- Metal GPU-accelerated rendering via Ghostty v1.3.1 submodule
 - **Liquid Glass UI** -- native macOS 26 Tahoe design language
-- **Tab Groups** -- 10 color presets, collapsible/expandable sections with chevron toggle, double-click to rename
+- **Tab Groups** -- 10 color presets, collapsible/expandable sections with chevron toggle, double-click to rename, drag-to-reorder tabs in tab bar and sidebar
 - **Split Panes** -- horizontal and vertical splits with directional focus navigation
 - **Command Palette** -- search and execute all operations with `Cmd+Shift+P`
 - **Session Persistence** -- tabs, splits, and working directories auto-saved and restored on restart
@@ -23,6 +23,9 @@ A macOS 26+ native terminal application built on [libghostty](https://github.com
 - **AI Agent IPC** -- MCP server for communication between AI agent instances (Claude Code, Codex CLI) across tabs and panes ([demo video](https://www.youtube.com/watch?v=Xty0ad9gGcM))
 - **Scriptable Browser** -- 25 CLI commands for browser automation (like cmux): snapshot, click, fill, eval, screenshot, wait, get-attribute, get-links, get-inputs, is-visible, hover, scroll. No enable step needed. `calyx` CLI bundled in the app
 - **Ghostty config compatibility** -- reads `~/.config/ghostty/config` (most keys hot-reload on save; see Settings for Calyx-managed keys)
+- **Quick Terminal** -- system-wide drop-down terminal toggled via global keybind
+- **Clipboard Confirmation** -- prompts before pasting large or multi-line content into the terminal
+- **Secure Keyboard Entry** -- prevents other apps from intercepting keystrokes (toggle via app menu)
 - **Auto-update** -- Sparkle-based updates for direct downloads (Homebrew installs use `brew upgrade`)
 
 ## Keyboard Shortcuts
