@@ -97,6 +97,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        if !SettingsWindowController.shared.confirmTermination() {
+            return .terminateCancel
+        }
+
         return .terminateNow
     }
 
@@ -222,6 +226,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         windowControllers.removeAll { $0 === controller }
         if !windowControllers.isEmpty {
             requestSave()
+        } else if quickTerminalController == nil {
+            NSApp.terminate(nil)
         }
     }
 

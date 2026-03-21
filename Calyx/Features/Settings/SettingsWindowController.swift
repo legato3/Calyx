@@ -181,6 +181,37 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         loadPresetIntoUI()
     }
 
+    /// Checks for unsaved changes before app termination.
+    /// Returns `true` to proceed, `false` to cancel termination.
+    func confirmTermination() -> Bool {
+        guard window?.isVisible == true, hasUnsavedChanges() else { return true }
+
+        let alert = NSAlert()
+        alert.messageText = "Save settings before quitting?"
+        alert.informativeText = "Your settings have unsaved changes."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save")
+        alert.addButton(withTitle: "Cancel")
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            savePresetFromUI()
+            snapshotCurrentAsLoaded()
+            return true
+        case .alertSecondButtonReturn:
+            UserDefaults.standard.set(lastLoadedOpacity, forKey: "terminalGlassOpacity")
+            NotificationCenter.default.post(name: .glassOpacityDidChange, object: nil, userInfo: ["opacity": lastLoadedOpacity])
+            UserDefaults.standard.set(lastLoadedPreset, forKey: "themeColorPreset")
+            UserDefaults.standard.set(lastLoadedCustomHex, forKey: "themeColorCustomHex")
+            return true
+        default:
+            // Do not revert UserDefaults here (unlike windowShouldClose Cancel).
+            // The user wants to keep editing their in-progress changes.
+            return false
+        }
+    }
+
     func showSettings() {
         loadPresetIntoUI()
         showWindow(nil)
