@@ -1487,6 +1487,15 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if let appDelegate = NSApp.delegate as? AppDelegate,
+           appDelegate.closingWouldTerminate(self),
+           !SettingsWindowController.shared.confirmTermination() {
+            return false
+        }
+        return true
+    }
+
     func windowDidChangeBackingProperties(_ notification: Notification) {
         guard let window = self.window, let tab = activeTab else { return }
         let scale = window.backingScaleFactor

@@ -235,6 +235,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         windowControllers.count == 1 && windowControllers.first === controller
     }
 
+    func closingWouldTerminate(_ controller: CalyxWindowController) -> Bool {
+        isClosingLastManagedWindow(controller) && quickTerminalController == nil
+    }
+
     func applyCurrentGhosttyConfigToAllWindows() {
         for controller in windowControllers {
             controller.applyCurrentGhosttyConfig()

@@ -204,6 +204,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
             NotificationCenter.default.post(name: .glassOpacityDidChange, object: nil, userInfo: ["opacity": lastLoadedOpacity])
             UserDefaults.standard.set(lastLoadedPreset, forKey: "themeColorPreset")
             UserDefaults.standard.set(lastLoadedCustomHex, forKey: "themeColorCustomHex")
+            loadPresetIntoUI()
             return true
         default:
             // Do not revert UserDefaults here (unlike windowShouldClose Cancel).
@@ -429,7 +430,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         alert.informativeText = "Your Glass settings have unsaved changes."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Discard")
+        alert.addButton(withTitle: "Don't Save")
         alert.addButton(withTitle: "Cancel")
 
         switch alert.runModal() {
