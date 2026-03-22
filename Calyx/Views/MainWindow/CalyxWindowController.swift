@@ -28,6 +28,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private var reviewStores: [UUID: DiffReviewStore] = [:]
     private var clipboardConfirmationController: ClipboardConfirmationController?
     private var composeOverlayTargetSurfaceID: UUID?
+    private let windowViewState = WindowViewState()
 
     // MARK: - Computed Properties
 
@@ -99,8 +100,11 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     // MARK: - Initialization
 
     convenience init(windowSession: WindowSession) {
+        let screenSize = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1280, height: 800)
+        let width = (screenSize.width * 0.65).rounded()
+        let height = (screenSize.height * 0.65).rounded()
         let window = CalyxWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -228,7 +232,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             self?.windowSession.sidebarMode = .changes
             self?.windowSession.showSidebar = true
             self?.refreshGitStatus()
-            self?.refreshHostingView()
         })
         commandRegistry.register(Command(id: "git.refresh", title: "Refresh Git Changes", category: "Git") { [weak self] in
             self?.refreshGitStatus()
@@ -356,10 +359,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             windowSession: windowSession,
             commandRegistry: commandRegistry,
             splitContainerView: splitContainerView ?? SplitContainerView(registry: SurfaceRegistry()),
-            activeBrowserController: activeBrowserController,
-            activeDiffState: activeDiffState,
-            activeDiffSource: activeDiffSource,
-            activeDiffReviewStore: activeDiffReviewStore,
+            viewState: windowViewState,
             sidebarMode: Binding(
                 get: { [weak self] in self?.windowSession.sidebarMode ?? .tabs },
                 set: { [weak self] in
@@ -369,11 +369,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                     }
                 }
             ),
-            gitChangesState: windowSession.gitChangesState,
-            gitEntries: windowSession.gitEntries,
-            gitCommits: windowSession.gitCommits,
-            expandedCommitIDs: windowSession.expandedCommitIDs,
-            commitFiles: windowSession.commitFiles,
             onTabSelected: { [weak self] tabID in self?.switchToTab(id: tabID) },
             onGroupSelected: { [weak self] groupID in self?.switchToGroup(id: groupID) },
             onNewTab: { [weak self] in self?.createNewTab() },
@@ -395,7 +390,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                       let group = self.windowSession.groups.first(where: { $0.id == groupID })
                 else { return }
                 group.moveTab(fromIndex: fromIndex, toIndex: toIndex)
-                self.refreshHostingView()
                 self.requestSave()
             },
             onSidebarDragCommitted: { [weak self] in self?.requestSave() },
@@ -405,10 +399,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             },
             onDiscardReview: { [weak self] in
                 guard let self, let tab = self.activeTab else { return }
-                if let store = self.reviewStores[tab.id] {
-                    store.clearAll()
-                    self.refreshHostingView()
-                }
+                self.reviewStores[tab.id]?.clearAll()
             },
             onSubmitAllReviews: { [weak self] in
                 self?.submitAllDiffReviews()
@@ -417,14 +408,21 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 self?.discardAllDiffReviews()
             },
             onComposeOverlaySend: { [weak self] text in self?.sendComposeText(text) ?? false },
-            onDismissComposeOverlay: { [weak self] in self?.dismissComposeOverlay() },
-            totalReviewCommentCount: totalReviewCommentCount,
-            reviewFileCount: reviewFileCount
+            onDismissComposeOverlay: { [weak self] in self?.dismissComposeOverlay() }
         )
     }
 
     private func refreshHostingView() {
-        hostingView?.rootView = buildMainContentView()
+        updateViewState()
+    }
+
+    private func updateViewState() {
+        windowViewState.activeBrowserController = activeBrowserController
+        windowViewState.activeDiffState = activeDiffState
+        windowViewState.activeDiffSource = activeDiffSource
+        windowViewState.activeDiffReviewStore = activeDiffReviewStore
+        windowViewState.totalReviewCommentCount = totalReviewCommentCount
+        windowViewState.reviewFileCount = reviewFileCount
     }
 
     // MARK: - Split Container Management
@@ -858,7 +856,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             guard let tab = activeTab, case .terminal = tab.content else { return }
             composeOverlayTargetSurfaceID = focusedController?.id
             windowSession.showComposeOverlay = true
-            refreshHostingView()
         }
     }
 
@@ -871,7 +868,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         guard windowSession.showComposeOverlay else { return }
         windowSession.showComposeOverlay = false
         composeOverlayTargetSurfaceID = nil
-        refreshHostingView()
         if case .terminal = activeTab?.content {
             restoreFocus()
         }
@@ -1100,8 +1096,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 case .windowShouldClose:
                     window?.close()
                 }
-            } else {
-                refreshHostingView()
             }
             requestSave()
             return
@@ -1202,7 +1196,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
            focusedView === surfaceView {
             window?.title = title
             tab.title = title
-            refreshHostingView()
         }
     }
 
@@ -1556,19 +1549,17 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
             let workDir = self.findWorkDir()
             guard let workDir else {
-                self.windowSession.gitChangesState = .error("No working directory found")
-                self.refreshHostingView()
+                self.windowSession.git.changesState = .error("No working directory found")
                 return
             }
 
-            self.windowSession.gitChangesState = .loading
-            self.refreshHostingView()
+            self.windowSession.git.changesState = .loading
 
             do {
                 let repoRoot = try await GitService.repoRoot(workDir: workDir)
                 guard !Task.isCancelled else { return }
 
-                self.windowSession.repoRoots[workDir] = repoRoot
+                self.windowSession.git.repoRoots[workDir] = repoRoot
 
                 async let statusResult = GitService.gitStatus(workDir: repoRoot)
                 async let logResult = GitService.commitLog(workDir: repoRoot, maxCount: 100, skip: 0)
@@ -1576,25 +1567,22 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 let (entries, commits) = try await (statusResult, logResult)
                 guard !Task.isCancelled else { return }
 
-                self.windowSession.gitEntries = entries
-                self.windowSession.gitCommits = commits
+                self.windowSession.git.entries = entries
+                self.windowSession.git.commits = commits
                 self.hasMoreCommits = true
-                self.windowSession.expandedCommitIDs = []
-                self.windowSession.commitFiles = [:]
-                self.windowSession.gitChangesState = .loaded
-                self.refreshHostingView()
+                self.windowSession.git.expandedCommitIDs = []
+                self.windowSession.git.commitFiles = [:]
+                self.windowSession.git.changesState = .loaded
             } catch let error as GitService.GitError {
                 guard !Task.isCancelled else { return }
                 if case .notARepository = error {
-                    self.windowSession.gitChangesState = .notRepository
+                    self.windowSession.git.changesState = .notRepository
                 } else {
-                    self.windowSession.gitChangesState = .error(error.localizedDescription)
+                    self.windowSession.git.changesState = .error(error.localizedDescription)
                 }
-                self.refreshHostingView()
             } catch {
                 guard !Task.isCancelled else { return }
-                self.windowSession.gitChangesState = .error(error.localizedDescription)
-                self.refreshHostingView()
+                self.windowSession.git.changesState = .error(error.localizedDescription)
             }
         }
     }
@@ -1604,10 +1592,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         guard loadMoreTask == nil || loadMoreTask?.isCancelled == true else { return }
         loadMoreTask = Task { [weak self] in
             guard let self else { return }
-            let currentCount = self.windowSession.gitCommits.count
+            let currentCount = self.windowSession.git.commits.count
 
             guard let workDir = self.findWorkDir(),
-                  let repoRoot = self.windowSession.repoRoots[workDir] else { return }
+                  let repoRoot = self.windowSession.git.repoRoots[workDir] else { return }
 
             do {
                 let moreCommits = try await GitService.commitLog(
@@ -1619,8 +1607,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                     return
                 }
 
-                self.windowSession.gitCommits.append(contentsOf: moreCommits)
-                self.refreshHostingView()
+                self.windowSession.git.commits.append(contentsOf: moreCommits)
             } catch {
                 // Silently ignore load-more errors
             }
@@ -1629,26 +1616,23 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func expandCommit(hash: String) {
-        if windowSession.expandedCommitIDs.contains(hash) {
-            windowSession.expandedCommitIDs.remove(hash)
-            refreshHostingView()
+        if windowSession.git.expandedCommitIDs.contains(hash) {
+            windowSession.git.expandedCommitIDs.remove(hash)
             return
         }
 
-        windowSession.expandedCommitIDs.insert(hash)
-        refreshHostingView()
+        windowSession.git.expandedCommitIDs.insert(hash)
 
-        if windowSession.commitFiles[hash] != nil { return }
+        if windowSession.git.commitFiles[hash] != nil { return }
 
         guard let workDir = findWorkDir(),
-              let repoRoot = windowSession.repoRoots[workDir] else { return }
+              let repoRoot = windowSession.git.repoRoots[workDir] else { return }
 
         expandTasks[hash] = Task { [weak self] in
             guard let self else { return }
             do {
                 let files = try await GitService.commitFiles(hash: hash, workDir: repoRoot)
-                self.windowSession.commitFiles[hash] = files
-                self.refreshHostingView()
+                self.windowSession.git.commitFiles[hash] = files
             } catch {
                 // Silently ignore
             }
@@ -1658,7 +1642,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     private func handleWorkingFileSelected(_ entry: GitFileEntry) {
         guard let workDir = findWorkDir(),
-              let repoRoot = windowSession.repoRoots[workDir] else { return }
+              let repoRoot = windowSession.git.repoRoots[workDir] else { return }
 
         let source: DiffSource
         if entry.isStaged {
@@ -1674,7 +1658,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     private func handleCommitFileSelected(_ entry: CommitFileEntry) {
         guard let workDir = findWorkDir(),
-              let repoRoot = windowSession.repoRoots[workDir] else { return }
+              let repoRoot = windowSession.git.repoRoots[workDir] else { return }
 
         let source: DiffSource = .commit(hash: entry.commitHash, path: entry.path, workDir: repoRoot)
         openDiffTab(source: source)
@@ -1706,7 +1690,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         diffStates[tab.id] = .loading
         let reviewStore = DiffReviewStore()
-        reviewStore.onCommentsChanged = { [weak self] in self?.refreshHostingView() }
+        reviewStore.onCommentsChanged = { [weak self] in
+            self?.windowViewState.reviewCommentGeneration += 1
+            self?.updateViewState()
+        }
         reviewStores[tab.id] = reviewStore
         refreshHostingView()
 
@@ -1760,7 +1747,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             }
         }
         // 4. Fallback from cached repo roots
-        return windowSession.repoRoots.values.first
+        return windowSession.git.repoRoots.values.first
     }
 
     // MARK: - IPC

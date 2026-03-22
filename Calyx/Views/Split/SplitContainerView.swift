@@ -16,6 +16,7 @@ class SplitContainerView: NSView {
     private var scrollWrappers: [UUID: SurfaceScrollView] = [:]
     var onRatioChange: ((UUID, Double, SplitDirection) -> Void)?
     var onDeferredLayoutComplete: (() -> Void)?
+    private var needsDeferredLayout = false
 
     private static let minPaneSize: CGFloat = 50
 
@@ -51,9 +52,13 @@ class SplitContainerView: NSView {
 
         // Don't move surface views into a zero-bounds container —
         // setFrameSize(zero) kills Metal drawable and ghostty stops rendering.
-        // resizeSubviews/layout will handle it when we get proper bounds.
-        guard bounds.width > 0 && bounds.height > 0 else { return }
+        // layout() will handle it when we get proper bounds.
+        guard bounds.width > 0 && bounds.height > 0 else {
+            needsDeferredLayout = true
+            return
+        }
 
+        needsDeferredLayout = false
         removeDividers()
         guard let root = tree.root else {
             subviews.forEach { $0.removeFromSuperview() }
@@ -74,18 +79,17 @@ class SplitContainerView: NSView {
 
     override func layout() {
         super.layout()
+        guard needsDeferredLayout else { return }
         guard bounds.width > 0 && bounds.height > 0 else { return }
         guard let root = currentTree.root else { return }
 
-        // Deferred layout: surface views haven't been added yet
-        if subviews.isEmpty || subviews.allSatisfy({ !($0 is SplitDividerView) }) {
-            removeDividers()
-            layoutNode(root, in: bounds)
-            removeOrphanedSurfaces()
-            let callback = onDeferredLayoutComplete
-            onDeferredLayoutComplete = nil
-            callback?()
-        }
+        needsDeferredLayout = false
+        removeDividers()
+        layoutNode(root, in: bounds)
+        removeOrphanedSurfaces()
+        let callback = onDeferredLayoutComplete
+        onDeferredLayoutComplete = nil
+        callback?()
     }
 
     // MARK: - Recursive Layout

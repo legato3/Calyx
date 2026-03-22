@@ -10,17 +10,9 @@ struct MainContentView: View {
     @Bindable var windowSession: WindowSession
     let commandRegistry: CommandRegistry?
     let splitContainerView: SplitContainerView
-    var activeBrowserController: BrowserTabController?
-    var activeDiffState: DiffLoadState?
-    var activeDiffSource: DiffSource?
-    var activeDiffReviewStore: DiffReviewStore?
+    let viewState: WindowViewState
 
     @Binding var sidebarMode: SidebarMode
-    var gitChangesState: GitChangesState = .notLoaded
-    var gitEntries: [GitFileEntry] = []
-    var gitCommits: [GitCommit] = []
-    var expandedCommitIDs: Set<String> = []
-    var commitFiles: [String: [CommitFileEntry]] = [:]
 
     var onTabSelected: ((UUID) -> Void)?
     var onGroupSelected: ((UUID) -> Void)?
@@ -46,14 +38,12 @@ struct MainContentView: View {
     var onDiscardAllReviews: (() -> Void)?
     var onComposeOverlaySend: ((String) -> Bool)?
     var onDismissComposeOverlay: (() -> Void)?
-    var totalReviewCommentCount: Int = 0
-    var reviewFileCount: Int = 0
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @AppStorage("terminalGlassOpacity") private var glassOpacity = 0.7
-    @AppStorage("themeColorPreset") private var themePreset = "original"
-    @AppStorage("themeColorCustomHex") private var customHex = "#050D1C"
-    @ObservedObject private var secureInput = SecureInput.shared
+    @AppStorage(AppStorageKeys.terminalGlassOpacity) private var glassOpacity = 0.7
+    @AppStorage(AppStorageKeys.themeColorPreset) private var themePreset = "original"
+    @AppStorage(AppStorageKeys.themeColorCustomHex) private var customHex = "#050D1C"
+    private var secureInput: SecureInput { SecureInput.shared }
     @State private var ghosttyProvider = GhosttyThemeProvider.shared
 
     private var themeColor: NSColor {
@@ -68,6 +58,7 @@ struct MainContentView: View {
         let activeGroup = windowSession.activeGroup
         let activeTabs = activeGroup?.tabs ?? []
         let activeTabID = activeGroup?.activeTabID
+        let chromeTint = Color(nsColor: GlassTheme.chromeTint(for: themeColor, glassOpacity: glassOpacity))
 
         GlassEffectContainer {
             HStack(spacing: 0) {
@@ -77,11 +68,11 @@ struct MainContentView: View {
                         activeGroupID: windowSession.activeGroupID,
                         activeTabID: activeTabID,
                         sidebarMode: $sidebarMode,
-                        gitChangesState: gitChangesState,
-                        gitEntries: gitEntries,
-                        gitCommits: gitCommits,
-                        expandedCommitIDs: expandedCommitIDs,
-                        commitFiles: commitFiles,
+                        gitChangesState: windowSession.git.changesState,
+                        gitEntries: windowSession.git.entries,
+                        gitCommits: windowSession.git.commits,
+                        expandedCommitIDs: windowSession.git.expandedCommitIDs,
+                        commitFiles: windowSession.git.commitFiles,
                         onGroupSelected: onGroupSelected,
                         onTabSelected: onTabSelected,
                         onNewGroup: onNewGroup,
@@ -128,15 +119,15 @@ struct MainContentView: View {
                             )
                         }
 
-                        if let diffSource = activeDiffSource, let diffState = activeDiffState {
+                        if let diffSource = viewState.activeDiffSource, let diffState = viewState.activeDiffState {
                             VStack(spacing: 0) {
                                 DiffToolbarView(
                                     source: diffSource,
-                                    reviewStore: activeDiffReviewStore,
+                                    reviewStore: viewState.activeDiffReviewStore,
                                     onSubmitReview: onSubmitReview,
                                     onDiscardReview: onDiscardReview,
-                                    totalReviewCommentCount: totalReviewCommentCount,
-                                    reviewFileCount: reviewFileCount,
+                                    totalReviewCommentCount: viewState.totalReviewCommentCount,
+                                    reviewFileCount: viewState.reviewFileCount,
                                     onSubmitAllReviews: onSubmitAllReviews,
                                     onDiscardAllReviews: onDiscardAllReviews
                                 )
@@ -152,7 +143,8 @@ struct MainContentView: View {
                                         diff: diff,
                                         reduceTransparency: reduceTransparency,
                                         glassOpacity: glassOpacity,
-                                        reviewStore: activeDiffReviewStore
+                                        reviewStore: viewState.activeDiffReviewStore,
+                                        commentGeneration: viewState.reviewCommentGeneration
                                     )
                                         .accessibilityIdentifier(AccessibilityID.Diff.content)
                                 case .error(let message):
@@ -167,9 +159,9 @@ struct MainContentView: View {
                                     }
                                 }
                             }
-                            .glassEffect(.clear.tint(Color(nsColor: GlassTheme.chromeTint(for: themeColor, glassOpacity: glassOpacity))), in: .rect)
+                            .glassEffect(.clear.tint(chromeTint), in: .rect)
                             .accessibilityIdentifier(AccessibilityID.Diff.container)
-                        } else if let browserController = activeBrowserController {
+                        } else if let browserController = viewState.activeBrowserController {
                             BrowserContainerView(controller: browserController)
                         } else {
                             VStack(spacing: 0) {
@@ -180,7 +172,7 @@ struct MainContentView: View {
                                 )
                                 .padding(.top, -1)
                                 .padding(.leading, 8)
-                                .glassEffect(.clear.tint(Color(nsColor: GlassTheme.chromeTint(for: themeColor, glassOpacity: glassOpacity))), in: .rect)
+                                .glassEffect(.clear.tint(chromeTint), in: .rect)
                                 .layoutPriority(1)
                                 .overlay(alignment: .topTrailing) {
                                     if secureInput.enabled {
@@ -201,7 +193,7 @@ struct MainContentView: View {
                                         )
                                         .frame(height: windowSession.composeOverlayHeight)
                                     }
-                                    .glassEffect(.clear.tint(Color(nsColor: GlassTheme.chromeTint(for: themeColor, glassOpacity: glassOpacity))), in: .rect)
+                                    .glassEffect(.clear.tint(chromeTint), in: .rect)
                                 }
                             }
                         }
@@ -229,7 +221,7 @@ struct MainContentView: View {
                 GeometryReader { geo in
                     Color.white.opacity(0.001)
                         .frame(height: geo.safeAreaInsets.top + 1)
-                        .glassEffect(.clear.tint(Color(nsColor: GlassTheme.chromeTint(for: themeColor, glassOpacity: glassOpacity))), in: .rect)
+                        .glassEffect(.clear.tint(chromeTint), in: .rect)
                         .offset(y: -geo.safeAreaInsets.top)
                 }
                 .allowsHitTesting(false)
@@ -268,6 +260,7 @@ struct DiffGlassContentView: NSViewRepresentable {
     let reduceTransparency: Bool
     let glassOpacity: Double
     var reviewStore: DiffReviewStore?
+    var commentGeneration: Int = 0
 
     func makeNSView(context: Context) -> DiffGlassHostView {
         let host = DiffGlassHostView(

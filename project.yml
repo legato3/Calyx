@@ -45,10 +45,15 @@ targets:
           cp -R "${PROJECT_DIR}/Resources/ghostty" "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/ghostty"
           cp -R "${PROJECT_DIR}/Resources/terminfo" "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/terminfo"
         name: Copy Ghostty Resources
+        outputFiles:
+          - $(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/Resources/ghostty
+          - $(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/Resources/terminfo
       - script: |
           mkdir -p "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/bin"
           cp "${BUILT_PRODUCTS_DIR}/calyx" "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/bin/calyx"
         name: Bundle CalyxCLI
+        outputFiles:
+          - $(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/Resources/bin/calyx
     info:
       path: Calyx/Info.plist
       properties:

@@ -21,12 +21,7 @@ class WindowSession: Identifiable {
     var showComposeOverlay: Bool = false
     var composeOverlayHeight: CGFloat = 120
     var sidebarMode: SidebarMode = .tabs
-    var gitChangesState: GitChangesState = .notLoaded
-    var gitEntries: [GitFileEntry] = []
-    var gitCommits: [GitCommit] = []
-    var expandedCommitIDs: Set<String> = []
-    var commitFiles: [String: [CommitFileEntry]] = [:]
-    var repoRoots: [String: String] = [:]
+    let git = GitState()
     var sidebarWidth: CGFloat = SidebarLayout.defaultWidth
 
     static let minSidebarWidth: CGFloat = SidebarLayout.minWidth

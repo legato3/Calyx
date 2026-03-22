@@ -37,10 +37,12 @@ final class CalyxMCPServer {
 
     init() {}
 
+    #if DEBUG
     /// For testing only — sets the token without starting the listener.
     func _testSetToken(_ token: String) {
         self.token = token
     }
+    #endif
 
     // MARK: - Lifecycle
 

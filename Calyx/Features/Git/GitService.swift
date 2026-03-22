@@ -19,7 +19,7 @@ enum GitService {
             case .notARepository:
                 "Not a git repository"
             case .gitNotFound:
-                "git not found at /usr/bin/git"
+                "git not found (checked /usr/bin, /opt/homebrew/bin, /usr/local/bin)"
             case .permissionDenied(let path):
                 "Permission denied: \(path)"
             case .commandFailed(let exitCode, let stderr, let command):
@@ -32,7 +32,10 @@ enum GitService {
         }
     }
 
-    private static let gitPath = "/usr/bin/git"
+    private static let gitPath: String = {
+        let candidates = ["/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"]
+        return candidates.first { FileManager.default.fileExists(atPath: $0) } ?? "/usr/bin/git"
+    }()
     private static let maxDiffSize = 1_000_000
 
     // MARK: - Public API
@@ -174,7 +177,7 @@ enum GitService {
                     "LC_ALL": "C",
                     "GIT_PAGER": "cat",
                     "GIT_TERMINAL_PROMPT": "0",
-                    "PATH": "/usr/bin:/usr/local/bin",
+                    "PATH": "/usr/bin:/usr/local/bin:/opt/homebrew/bin",
                     "HOME": NSHomeDirectory(),
                 ]
 

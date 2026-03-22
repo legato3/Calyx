@@ -89,7 +89,9 @@ class SurfaceView: NSView {
     deinit {
         trackingAreas.forEach { removeTrackingArea($0) }
         if _hasSecureInput {
-            SecureInput.shared.removeScoped(ObjectIdentifier(self))
+            MainActor.assumeIsolated {
+                SecureInput.shared.removeScoped(ObjectIdentifier(self))
+            }
         }
     }
 

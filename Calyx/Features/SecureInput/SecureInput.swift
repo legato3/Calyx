@@ -2,7 +2,8 @@ import Carbon
 import Cocoa
 import OSLog
 
-class SecureInput: ObservableObject, @unchecked Sendable {
+@Observable @MainActor
+final class SecureInput {
     static let shared = SecureInput()
 
     private static let logger = Logger(
@@ -21,26 +22,36 @@ class SecureInput: ObservableObject, @unchecked Sendable {
     private var scoped: [ObjectIdentifier: Bool] = [:]
 
     // True when EnableSecureEventInput() has been called
-    @Published private(set) var enabled: Bool = false
+    private(set) var enabled: Bool = false
 
     // True if we WANT secure input enabled
     private var desired: Bool {
         global || scoped.contains(where: { $0.value })
     }
 
+    nonisolated(unsafe) private var observers: [Any] = []
+
     private init() {
-        let center = NotificationCenter.default
-        center.addObserver(self, selector: #selector(onDidResignActive(notification:)),
-                          name: NSApplication.didResignActiveNotification, object: nil)
-        center.addObserver(self, selector: #selector(onDidBecomeActive(notification:)),
-                          name: NSApplication.didBecomeActiveNotification, object: nil)
+        observers.append(NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onDidResignActive() }
+        })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onDidBecomeActive() }
+        })
     }
 
     deinit {
-        NotificationCenter.default.removeObserver(self)
-        scoped.removeAll()
-        global = false
-        apply()
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     func setScoped(_ object: ObjectIdentifier, focused: Bool) {
@@ -71,7 +82,7 @@ class SecureInput: ObservableObject, @unchecked Sendable {
         Self.logger.warning("secure input apply failed err=\(err)")
     }
 
-    @objc private func onDidBecomeActive(notification: NSNotification) {
+    private func onDidBecomeActive() {
         guard !enabled && desired else { return }
         let err = EnableSecureEventInput()
         if err == noErr {
@@ -82,7 +93,7 @@ class SecureInput: ObservableObject, @unchecked Sendable {
         Self.logger.warning("secure input apply failed err=\(err)")
     }
 
-    @objc private func onDidResignActive(notification: NSNotification) {
+    private func onDidResignActive() {
         guard enabled else { return }
         let err = DisableSecureEventInput()
         if err == noErr {

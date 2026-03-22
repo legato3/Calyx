@@ -128,9 +128,9 @@ private struct GlassButtonModifier: ViewModifier {
 
 private struct SidebarBackgroundModifier: ViewModifier {
     let reduceTransparency: Bool
-    @AppStorage("terminalGlassOpacity") private var glassOpacity = 0.7
-    @AppStorage("themeColorPreset") private var themePreset = "original"
-    @AppStorage("themeColorCustomHex") private var customHex = "#050D1C"
+    @AppStorage(AppStorageKeys.terminalGlassOpacity) private var glassOpacity = 0.7
+    @AppStorage(AppStorageKeys.themeColorPreset) private var themePreset = "original"
+    @AppStorage(AppStorageKeys.themeColorCustomHex) private var customHex = "#050D1C"
     @State private var ghosttyProvider = GhosttyThemeProvider.shared
 
     private var themeColor: NSColor {
