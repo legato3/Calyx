@@ -260,10 +260,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(withTitle: "About Calyx", action: #selector(showAboutPanel), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Preferences…", action: #selector(openPreferences(_:)), keyEquivalent: ",")
-        if !UpdateController.shared.isHomebrew {
-            let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
-            appMenu.addItem(updateItem)
-        }
         appMenu.addItem(.separator())
 
         let servicesItem = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
@@ -686,15 +682,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Reads selection parameters (fromCol, toCol, row) from the general pasteboard as JSON.
     /// Only available when launched with --uitesting flag.
     private func debugLog(_ msg: String) {
-        let logPath = "/tmp/calyx_debug_select.log"
-        let entry = "\(Date()): \(msg)\n"
-        if let fh = FileHandle(forWritingAtPath: logPath) {
-            fh.seekToEndOfFile()
-            fh.write(entry.data(using: .utf8) ?? Data())
-            fh.closeFile()
-        } else {
-            FileManager.default.createFile(atPath: logPath, contents: entry.data(using: .utf8))
-        }
+        logger.debug("[UITest] \(msg)")
     }
 
     private func performDebugSelect() {
@@ -831,9 +819,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsWindowController.shared.showSettings()
     }
 
-    @objc private func checkForUpdates(_ sender: Any?) {
-        UpdateController.shared.checkForUpdates()
-    }
 
     @objc private func toggleSecureInput(_ sender: NSMenuItem) {
         let input = SecureInput.shared

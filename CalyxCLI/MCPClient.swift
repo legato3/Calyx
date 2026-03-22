@@ -9,6 +9,7 @@ import Foundation
 
 struct BrowserClient {
     let port: Int
+    let token: String
 
     /// Read connection info from ~/.config/calyx/browser.json
     static func fromStateFile() throws -> BrowserClient {
@@ -21,10 +22,11 @@ struct BrowserClient {
 
         let data = try Data(contentsOf: stateFile)
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let port = json["port"] as? Int else {
+              let port = json["port"] as? Int,
+              let token = json["token"] as? String else {
             throw CLIError.invalidStateFile
         }
-        return BrowserClient(port: port)
+        return BrowserClient(port: port, token: token)
     }
 
     /// Send a browser command and return the result.
@@ -45,6 +47,7 @@ struct BrowserClient {
             "-s", "--connect-timeout", "5", "--max-time", "30",
             "-X", "POST",
             "-H", "Content-Type: application/json",
+            "-H", "Authorization: Bearer \(token)",
             "-d", bodyStr,
             "http://127.0.0.1:\(port)/browser",
         ]

@@ -18,10 +18,28 @@ struct SessionSnapshot: Codable, Equatable {
 }
 
 extension SessionSnapshot {
+    /// Stepwise migration pipeline. Add a new step here when bumping currentSchemaVersion.
     static func migrate(_ snapshot: SessionSnapshot) -> SessionSnapshot {
-        // Currently v2→v3 defaults are handled by Decodable init.
-        // Just normalize the version number.
-        return SessionSnapshot(schemaVersion: currentSchemaVersion, windows: snapshot.windows)
+        var current = snapshot
+        if current.schemaVersion < 2 { current = migrateV1ToV2(current) }
+        if current.schemaVersion < 3 { current = migrateV2ToV3(current) }
+        if current.schemaVersion < 4 { current = migrateV3ToV4(current) }
+        return SessionSnapshot(schemaVersion: currentSchemaVersion, windows: current.windows)
+    }
+
+    // v1 → v2: no structural changes; optional field defaults handled by Decodable.
+    private static func migrateV1ToV2(_ s: SessionSnapshot) -> SessionSnapshot {
+        SessionSnapshot(schemaVersion: 2, windows: s.windows)
+    }
+
+    // v2 → v3: no structural changes; optional field defaults handled by Decodable.
+    private static func migrateV2ToV3(_ s: SessionSnapshot) -> SessionSnapshot {
+        SessionSnapshot(schemaVersion: 3, windows: s.windows)
+    }
+
+    // v3 → v4: no structural changes; optional field defaults handled by Decodable.
+    private static func migrateV3ToV4(_ s: SessionSnapshot) -> SessionSnapshot {
+        SessionSnapshot(schemaVersion: 4, windows: s.windows)
     }
 }
 

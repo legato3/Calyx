@@ -102,7 +102,7 @@ final class BrowserServer {
                         self.send(connection, HTTPParser.response(statusCode: 404, body: nil))
                         return
                     }
-                    let authHeader = request.headers["authorization"] ?? request.headers["Authorization"] ?? ""
+                    let authHeader = request.headers.first { $0.key.lowercased() == "authorization" }?.value ?? ""
                     guard authHeader == "Bearer \(self.token)" else {
                         self.send(connection, HTTPParser.response(statusCode: 401, body: nil))
                         return

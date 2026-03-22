@@ -151,12 +151,15 @@ enum GhosttyActionRouter {
         case GHOSTTY_ACTION_TOGGLE_QUICK_TERMINAL:
             return handleToggleQuickTerminal(app, target: target)
 
-        case GHOSTTY_ACTION_CLOSE_ALL_WINDOWS,
+        case GHOSTTY_ACTION_TOGGLE_COMMAND_PALETTE:
+            return handleToggleCommandPalette(app, target: target)
+
+        case GHOSTTY_ACTION_CHECK_FOR_UPDATES,
+             GHOSTTY_ACTION_CLOSE_ALL_WINDOWS,
              GHOSTTY_ACTION_TOGGLE_TAB_OVERVIEW,
              GHOSTTY_ACTION_TOGGLE_WINDOW_DECORATIONS,
              GHOSTTY_ACTION_TOGGLE_MAXIMIZE,
              GHOSTTY_ACTION_TOGGLE_SPLIT_ZOOM,
-             GHOSTTY_ACTION_TOGGLE_COMMAND_PALETTE,
              GHOSTTY_ACTION_TOGGLE_VISIBILITY,
              GHOSTTY_ACTION_PRESENT_TERMINAL,
              GHOSTTY_ACTION_QUIT_TIMER,
@@ -167,7 +170,6 @@ enum GhosttyActionRouter {
              GHOSTTY_ACTION_SHOW_GTK_INSPECTOR,
              GHOSTTY_ACTION_MOVE_TAB,
              GHOSTTY_ACTION_RESET_WINDOW_SIZE,
-             GHOSTTY_ACTION_CHECK_FOR_UPDATES,
              GHOSTTY_ACTION_UNDO,
              GHOSTTY_ACTION_REDO,
              GHOSTTY_ACTION_SHOW_ON_SCREEN_KEYBOARD:
@@ -484,7 +486,7 @@ enum GhosttyActionRouter {
         target: ghostty_target_s,
         value: ghostty_action_reload_config_s
     ) -> Bool {
-        GhosttyAppController.shared.reloadConfig(soft: value.soft)
+        GhosttyAppController.shared.scheduleReloadConfig(soft: value.soft)
         return true
     }
 
@@ -745,6 +747,15 @@ enum GhosttyActionRouter {
     }
 
     // MARK: - Quick Terminal
+
+    private static func handleToggleCommandPalette(
+        _ app: ghostty_app_t,
+        target: ghostty_target_s
+    ) -> Bool {
+        guard let wc = NSApp.keyWindow?.windowController as? CalyxWindowController else { return false }
+        wc.toggleCommandPalette()
+        return true
+    }
 
     private static func handleToggleQuickTerminal(
         _ app: ghostty_app_t,

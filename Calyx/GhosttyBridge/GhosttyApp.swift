@@ -106,7 +106,7 @@ final class GhosttyAppController {
 
         // Start watching ghostty config file for changes.
         self.configFileWatcher = ConfigFileWatcher { [weak self] in
-            self?.reloadConfig(soft: false)
+            self?.scheduleReloadConfig(soft: false)
         }
 
         logger.info("GhosttyAppController initialized successfully")
@@ -143,6 +143,12 @@ final class GhosttyAppController {
     func keyboardChanged() {
         guard let app else { return }
         GhosttyFFI.appKeyboardChanged(app)
+    }
+
+    /// Schedule a debounced config reload through the coordinator.
+    /// Prefer this over reloadConfig for all external callers.
+    func scheduleReloadConfig(soft: Bool = false) {
+        reloadCoordinator?.reloadConfig(soft: soft)
     }
 
     /// Reload configuration from disk.
