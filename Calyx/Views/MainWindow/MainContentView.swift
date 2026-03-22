@@ -14,31 +14,7 @@ struct MainContentView: View {
 
     @Binding var sidebarMode: SidebarMode
 
-    var onTabSelected: ((UUID) -> Void)?
-    var onGroupSelected: ((UUID) -> Void)?
-    var onNewTab: (() -> Void)?
-    var onNewGroup: (() -> Void)?
-    var onCloseTab: ((UUID) -> Void)?
-    var onGroupRenamed: (() -> Void)?
-    var onToggleSidebar: (() -> Void)?
-    var onDismissCommandPalette: (() -> Void)?
-    var onWorkingFileSelected: ((GitFileEntry) -> Void)?
-    var onCommitFileSelected: ((CommitFileEntry) -> Void)?
-    var onRefreshGitStatus: (() -> Void)?
-    var onLoadMoreCommits: (() -> Void)?
-    var onExpandCommit: ((String) -> Void)?
-    var onSidebarWidthChanged: ((CGFloat) -> Void)?
-    var onCollapseToggled: (() -> Void)?
-    var onCloseAllTabsInGroup: ((UUID) -> Void)?
-    var onMoveTab: ((UUID, Int, Int) -> Void)?  // (groupID, fromIndex, toIndex)
-    var onSidebarDragCommitted: (() -> Void)?
-    var onSubmitReview: (() -> Void)?
-    var onDiscardReview: (() -> Void)?
-    var onSubmitAllReviews: (() -> Void)?
-    var onDiscardAllReviews: (() -> Void)?
-    var onComposeOverlaySend: ((String) -> Bool)?
-    var onDismissComposeOverlay: (() -> Void)?
-
+    @Environment(WindowActions.self) private var actions
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @AppStorage(AppStorageKeys.terminalGlassOpacity) private var glassOpacity = 0.7
     @AppStorage(AppStorageKeys.themeColorPreset) private var themePreset = "original"
@@ -73,26 +49,26 @@ struct MainContentView: View {
                         gitCommits: windowSession.git.commits,
                         expandedCommitIDs: windowSession.git.expandedCommitIDs,
                         commitFiles: windowSession.git.commitFiles,
-                        onGroupSelected: onGroupSelected,
-                        onTabSelected: onTabSelected,
-                        onNewGroup: onNewGroup,
-                        onCloseTab: onCloseTab,
-                        onGroupRenamed: onGroupRenamed,
-                        onCollapseToggled: onCollapseToggled,
-                        onCloseAllTabsInGroup: onCloseAllTabsInGroup,
-                        onWorkingFileSelected: onWorkingFileSelected,
-                        onCommitFileSelected: onCommitFileSelected,
-                        onRefreshGitStatus: onRefreshGitStatus,
-                        onLoadMoreCommits: onLoadMoreCommits,
-                        onExpandCommit: onExpandCommit,
-                        onMoveTab: onMoveTab
+                        onGroupSelected: actions.onGroupSelected,
+                        onTabSelected: actions.onTabSelected,
+                        onNewGroup: actions.onNewGroup,
+                        onCloseTab: actions.onCloseTab,
+                        onGroupRenamed: actions.onGroupRenamed,
+                        onCollapseToggled: actions.onCollapseToggled,
+                        onCloseAllTabsInGroup: actions.onCloseAllTabsInGroup,
+                        onWorkingFileSelected: actions.onWorkingFileSelected,
+                        onCommitFileSelected: actions.onCommitFileSelected,
+                        onRefreshGitStatus: actions.onRefreshGitStatus,
+                        onLoadMoreCommits: actions.onLoadMoreCommits,
+                        onExpandCommit: actions.onExpandCommit,
+                        onMoveTab: actions.onMoveTab
                     )
                     .frame(width: windowSession.sidebarWidth)
                     .overlay(alignment: .trailing) {
                         SidebarResizeHandle(
                             currentWidth: windowSession.sidebarWidth,
-                            onWidthChanged: { onSidebarWidthChanged?($0) },
-                            onDragCommitted: { onSidebarDragCommitted?() }
+                            onWidthChanged: { actions.onSidebarWidthChanged?($0) },
+                            onDragCommitted: { actions.onSidebarDragCommitted?() }
                         )
                         .offset(x: 0)
                         .zIndex(1)
@@ -109,11 +85,11 @@ struct MainContentView: View {
                             TabBarContentView(
                                 tabs: activeTabs,
                                 activeTabID: activeTabID,
-                                onTabSelected: onTabSelected,
-                                onNewTab: onNewTab,
-                                onCloseTab: onCloseTab,
+                                onTabSelected: actions.onTabSelected,
+                                onNewTab: actions.onNewTab,
+                                onCloseTab: actions.onCloseTab,
                                 onMoveTab: activeGroup != nil
-                                    ? { from, to in onMoveTab?(activeGroup!.id, from, to) }
+                                    ? { from, to in actions.onMoveTab?(activeGroup!.id, from, to) }
                                     : nil,
                                 activeGroupID: activeGroup?.id
                             )
@@ -124,12 +100,12 @@ struct MainContentView: View {
                                 DiffToolbarView(
                                     source: diffSource,
                                     reviewStore: viewState.activeDiffReviewStore,
-                                    onSubmitReview: onSubmitReview,
-                                    onDiscardReview: onDiscardReview,
+                                    onSubmitReview: actions.onSubmitReview,
+                                    onDiscardReview: actions.onDiscardReview,
                                     totalReviewCommentCount: viewState.totalReviewCommentCount,
                                     reviewFileCount: viewState.reviewFileCount,
-                                    onSubmitAllReviews: onSubmitAllReviews,
-                                    onDiscardAllReviews: onDiscardAllReviews
+                                    onSubmitAllReviews: actions.onSubmitAllReviews,
+                                    onDiscardAllReviews: actions.onDiscardAllReviews
                                 )
                                 switch diffState {
                                 case .loading:
@@ -188,8 +164,8 @@ struct MainContentView: View {
                                         )
 
                                         ComposeOverlayContainerView(
-                                            onSend: onComposeOverlaySend,
-                                            onDismiss: onDismissComposeOverlay
+                                            onSend: actions.onComposeOverlaySend,
+                                            onDismiss: actions.onDismissComposeOverlay
                                         )
                                         .frame(height: windowSession.composeOverlayHeight)
                                     }
@@ -201,12 +177,12 @@ struct MainContentView: View {
 
                     if windowSession.showCommandPalette, let commandRegistry {
                         Color.black.opacity(0.01)
-                            .onTapGesture { onDismissCommandPalette?() }
+                            .onTapGesture { actions.onDismissCommandPalette?() }
 
                         VStack {
                             CommandPaletteContainerView(
                                 registry: commandRegistry,
-                                onDismiss: onDismissCommandPalette
+                                onDismiss: actions.onDismissCommandPalette
                             )
                             .frame(width: 500, height: 340)
                             .glassEffect(.regular, in: .rect(cornerRadius: 12))

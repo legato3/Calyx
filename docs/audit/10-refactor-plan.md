@@ -104,7 +104,7 @@ final class ReviewController {
 ### Risk
 Medium. `sendReviewToAgent` accesses `windowSession.groups` and terminal controllers. Will need to pass these as parameters or give ReviewController a reference.
 
-## Step 4: Extract FocusManager (Week 2)
+## Step 4: ✅ Extract FocusManager (done)
 
 ### What
 Create `FocusManager` encapsulating focus restoration logic:
@@ -131,7 +131,7 @@ final class FocusManager {
 ### Risk
 Medium. Focus logic interacts with window, tab registry, and split container. Parameters will be verbose but the logic is self-contained.
 
-## Step 5: Type the top 5 notifications (Week 2-3)
+## Step 5: ✅ Type the top 5 notifications (done)
 
 ### What
 Replace untyped `Notification.Name` + `userInfo` with typed wrappers:
@@ -156,7 +156,7 @@ struct GhosttyNewSplitEvent {
 ### Risk
 Low. Each notification can be migrated independently. The typed wrapper adds validation at the call site without changing the notification mechanism.
 
-## Step 6: Reduce MainContentView callbacks (Week 3-4)
+## Step 6: ✅ Reduce MainContentView callbacks (done)
 
 ### What
 Create `WindowActions` environment object:

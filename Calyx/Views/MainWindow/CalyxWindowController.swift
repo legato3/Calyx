@@ -12,10 +12,11 @@ private let logger = Logger(
 class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private(set) var windowSession: WindowSession
     private var splitContainerView: SplitContainerView?
-    private var hostingView: NSHostingView<MainContentView>?
+    private var hostingView: NSHostingView<AnyView>?
     private let commandRegistry = CommandRegistry()
     private var closingTabIDs: Set<UUID> = []
-    private var focusRequestID: UInt64 = 0
+    private let focusManager = FocusManager()
+    private let windowActions = WindowActions()
     private var isRestoring = false
     private var browserControllers: [UUID: BrowserTabController] = [:]
     private let gitController: GitController
@@ -231,10 +232,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         commandRegistry.register(Command(id: "git.showChanges", title: "Show Git Changes", category: "Git") { [weak self] in
             self?.windowSession.sidebarMode = .changes
             self?.windowSession.showSidebar = true
-            self?.refreshGitStatus()
+            self?.gitController.refreshGitStatus()
         })
         commandRegistry.register(Command(id: "git.refresh", title: "Refresh Git Changes", category: "Git") { [weak self] in
-            self?.refreshGitStatus()
+            self?.gitController.refreshGitStatus()
         })
         commandRegistry.register(Command(id: "ipc.enable", title: "Enable AI Agent IPC", category: "IPC", isAvailable: {
             !CalyxMCPServer.shared.isRunning
@@ -311,8 +312,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
         self.splitContainerView = container
 
+        wireWindowActions()
         let mainContent = buildMainContentView()
-        let hosting = NSHostingView(rootView: mainContent)
+        let hosting = NSHostingView(rootView: AnyView(mainContent.environment(windowActions)))
         hosting.frame = contentView.bounds
         hosting.autoresizingMask = [.width, .height]
         contentView.addSubview(hosting)
@@ -354,8 +356,47 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     // MARK: - Content View Building
 
+    private func wireWindowActions() {
+        windowActions.onTabSelected = { [weak self] tabID in self?.switchToTab(id: tabID) }
+        windowActions.onGroupSelected = { [weak self] groupID in self?.switchToGroup(id: groupID) }
+        windowActions.onNewTab = { [weak self] in self?.createNewTab() }
+        windowActions.onNewGroup = { [weak self] in self?.createNewGroup() }
+        windowActions.onCloseTab = { [weak self] tabID in self?.closeTab(id: tabID) }
+        windowActions.onGroupRenamed = { [weak self] in self?.requestSave() }
+        windowActions.onToggleSidebar = { [weak self] in self?.toggleSidebar() }
+        windowActions.onDismissCommandPalette = { [weak self] in self?.dismissCommandPalette() }
+        windowActions.onWorkingFileSelected = { [weak self] entry in self?.gitController.handleWorkingFileSelected(entry) }
+        windowActions.onCommitFileSelected = { [weak self] entry in self?.gitController.handleCommitFileSelected(entry) }
+        windowActions.onRefreshGitStatus = { [weak self] in self?.gitController.refreshGitStatus() }
+        windowActions.onLoadMoreCommits = { [weak self] in self?.gitController.loadMoreCommits() }
+        windowActions.onExpandCommit = { [weak self] hash in self?.gitController.expandCommit(hash: hash) }
+        windowActions.onSidebarWidthChanged = { [weak self] width in self?.windowSession.sidebarWidth = width }
+        windowActions.onCollapseToggled = { [weak self] in self?.requestSave() }
+        windowActions.onCloseAllTabsInGroup = { [weak self] groupID in self?.closeAllTabsInGroup(id: groupID) }
+        windowActions.onMoveTab = { [weak self] groupID, fromIndex, toIndex in
+            guard let self,
+                  let group = self.windowSession.groups.first(where: { $0.id == groupID })
+            else { return }
+            group.moveTab(fromIndex: fromIndex, toIndex: toIndex)
+            self.requestSave()
+        }
+        windowActions.onSidebarDragCommitted = { [weak self] in self?.requestSave() }
+        windowActions.onSubmitReview = { [weak self] in
+            guard let self, let tab = self.activeTab else { return }
+            self.reviewController.submitDiffReview(tabID: tab.id)
+        }
+        windowActions.onDiscardReview = { [weak self] in
+            guard let self, let tab = self.activeTab else { return }
+            self.reviewController.reviewStores[tab.id]?.clearAll()
+        }
+        windowActions.onSubmitAllReviews = { [weak self] in self?.reviewController.submitAllDiffReviews() }
+        windowActions.onDiscardAllReviews = { [weak self] in self?.reviewController.discardAllDiffReviews() }
+        windowActions.onComposeOverlaySend = { [weak self] text in self?.sendComposeText(text) ?? false }
+        windowActions.onDismissComposeOverlay = { [weak self] in self?.dismissComposeOverlay() }
+    }
+
     private func buildMainContentView() -> MainContentView {
-        return MainContentView(
+        MainContentView(
             windowSession: windowSession,
             commandRegistry: commandRegistry,
             splitContainerView: splitContainerView ?? SplitContainerView(registry: SurfaceRegistry()),
@@ -365,50 +406,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 set: { [weak self] in
                     self?.windowSession.sidebarMode = $0
                     if $0 == .changes {
-                        self?.refreshGitStatus()
+                        self?.gitController.refreshGitStatus()
                     }
                 }
-            ),
-            onTabSelected: { [weak self] tabID in self?.switchToTab(id: tabID) },
-            onGroupSelected: { [weak self] groupID in self?.switchToGroup(id: groupID) },
-            onNewTab: { [weak self] in self?.createNewTab() },
-            onNewGroup: { [weak self] in self?.createNewGroup() },
-            onCloseTab: { [weak self] tabID in self?.closeTab(id: tabID) },
-            onGroupRenamed: { [weak self] in self?.requestSave() },
-            onToggleSidebar: { [weak self] in self?.toggleSidebar() },
-            onDismissCommandPalette: { [weak self] in self?.dismissCommandPalette() },
-            onWorkingFileSelected: { [weak self] entry in self?.gitController.handleWorkingFileSelected(entry) },
-            onCommitFileSelected: { [weak self] entry in self?.gitController.handleCommitFileSelected(entry) },
-            onRefreshGitStatus: { [weak self] in self?.gitController.refreshGitStatus() },
-            onLoadMoreCommits: { [weak self] in self?.gitController.loadMoreCommits() },
-            onExpandCommit: { [weak self] hash in self?.gitController.expandCommit(hash: hash) },
-            onSidebarWidthChanged: { [weak self] width in self?.windowSession.sidebarWidth = width },
-            onCollapseToggled: { [weak self] in self?.requestSave() },
-            onCloseAllTabsInGroup: { [weak self] groupID in self?.closeAllTabsInGroup(id: groupID) },
-            onMoveTab: { [weak self] groupID, fromIndex, toIndex in
-                guard let self,
-                      let group = self.windowSession.groups.first(where: { $0.id == groupID })
-                else { return }
-                group.moveTab(fromIndex: fromIndex, toIndex: toIndex)
-                self.requestSave()
-            },
-            onSidebarDragCommitted: { [weak self] in self?.requestSave() },
-            onSubmitReview: { [weak self] in
-                guard let self, let tab = self.activeTab else { return }
-                self.reviewController.submitDiffReview(tabID: tab.id)
-            },
-            onDiscardReview: { [weak self] in
-                guard let self, let tab = self.activeTab else { return }
-                self.reviewController.reviewStores[tab.id]?.clearAll()
-            },
-            onSubmitAllReviews: { [weak self] in
-                self?.reviewController.submitAllDiffReviews()
-            },
-            onDiscardAllReviews: { [weak self] in
-                self?.reviewController.discardAllDiffReviews()
-            },
-            onComposeOverlaySend: { [weak self] text in self?.sendComposeText(text) ?? false },
-            onDismissComposeOverlay: { [weak self] in self?.dismissComposeOverlay() }
+            )
         )
     }
 
@@ -449,24 +450,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         updateTerminalLayout()
     }
 
-    @discardableResult
-    private func focusActiveTabImmediately() -> Bool {
-        guard let tab = activeTab,
-              let focusedID = tab.splitTree.focusedLeafID,
-              let focusView = tab.registry.view(for: focusedID) else {
-            return false
-        }
-
-        let becameFirstResponder = window?.makeFirstResponder(focusView) ?? false
-        guard becameFirstResponder else { return false }
-
-        tab.registry.controller(for: focusedID)?.setFocus(true)
-        tab.registry.controller(for: focusedID)?.refresh()
-        focusView.needsDisplay = true
-        tab.clearUnreadNotifications()
-        return true
-    }
-
     // MARK: - Tab Activation Helpers
 
     private func activateCurrentTab() {
@@ -477,8 +460,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             tab.registry.resumeAll()
             rebuildSplitContainer()
             updateTerminalLayout()
-            focusActiveTabImmediately()  // best-effort synchronous focus
-            restoreFocus()               // async safety net (handles post-layout focus loss)
+            focusManager.focusImmediately(window: window, tab: activeTab)  // best-effort synchronous focus
+            focusManager.restoreFocus(window: window, tab: activeTab, splitContainerView: splitContainerView)  // async safety net (handles post-layout focus loss)
         case .browser:
             DispatchQueue.main.async { [weak self] in
                 if let bv = self?.browserController(for: tab.id)?.browserView {
@@ -534,7 +517,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         updateLayout()
         refreshHostingView()
 
-        restoreFocus()
+        focusManager.restoreFocus(window: window, tab: activeTab, splitContainerView: splitContainerView)
         retargetComposeOverlayIfNeeded()
         requestSave()
     }
@@ -706,7 +689,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         updateLayout()
         refreshHostingView()
 
-        restoreFocus()
+        focusManager.restoreFocus(window: window, tab: activeTab, splitContainerView: splitContainerView)
         retargetComposeOverlayIfNeeded()
         requestSave()
     }
@@ -816,7 +799,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         guard let tab = activeTab else { return }
         switch tab.content {
         case .terminal:
-            restoreFocus()
+            focusManager.restoreFocus(window: window, tab: activeTab, splitContainerView: splitContainerView)
         case .browser:
             if let bv = activeBrowserController?.browserView {
                 window?.makeFirstResponder(bv)
@@ -846,7 +829,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         windowSession.showComposeOverlay = false
         composeOverlayTargetSurfaceID = nil
         if case .terminal = activeTab?.content {
-            restoreFocus()
+            focusManager.restoreFocus(window: window, tab: activeTab, splitContainerView: splitContainerView)
         }
     }
 
@@ -904,58 +887,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         return true
     }
 
-    private func restoreFocus() {
-        focusRequestID &+= 1
-        let requestID = focusRequestID
-        let startTime = CACurrentMediaTime()
-
-        DispatchQueue.main.async { [weak self] in
-            self?.attemptFocusRestore(requestID: requestID, startTime: startTime)
-        }
-    }
-
-    private static let focusRestoreTimeout: Double = 0.5
-
-    private func attemptFocusRestore(requestID: UInt64, startTime: Double) {
-        guard requestID == focusRequestID else { return }
-
-        let elapsed = CACurrentMediaTime() - startTime
-
-        // Non-key window → skip; windowDidBecomeKey will call restoreFocus()
-        guard window?.isKeyWindow == true else { return }
-
-        guard let tab = activeTab,
-              let focusedID = tab.splitTree.focusedLeafID,
-              let focusView = tab.registry.view(for: focusedID) else { return }
-
-        let inWindow = focusView.window === self.window
-        let hasSuperview = focusView.superview != nil
-
-        // View must be attached to THIS window's hierarchy
-        guard inWindow, hasSuperview else {
-            guard elapsed < Self.focusRestoreTimeout else {
-                splitContainerView?.onDeferredLayoutComplete = { [weak self] in
-                    guard let self, requestID == self.focusRequestID else { return }
-                    self.attemptFocusRestore(requestID: requestID, startTime: CACurrentMediaTime())
-                }
-                return
-            }
-            // Retry with 10ms backoff
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
-                self?.attemptFocusRestore(requestID: requestID, startTime: startTime)
-            }
-            return
-        }
-
-        let result = window?.makeFirstResponder(focusView) ?? false
-        if result {
-            tab.registry.controller(for: focusedID)?.setFocus(true)
-            tab.registry.controller(for: focusedID)?.refresh()
-            focusView.needsDisplay = true
-            activeTab?.clearUnreadNotifications()
-        }
-    }
-
     // MARK: - Split Operations
 
     private func handleDividerDrag(leafID: UUID, delta: Double, direction: SplitDirection) {
@@ -998,16 +929,15 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     // MARK: - Notification Handlers
 
     @objc private func handleNewSplitNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard let event = GhosttyNewSplitEvent.from(notification) else { return }
         guard let tab = activeTab else { return }
-        guard let surfaceID = tab.registry.id(for: surfaceView) else { return }
-        guard belongsToThisWindow(surfaceView) else { return }
+        guard let surfaceID = tab.registry.id(for: event.surfaceView) else { return }
+        guard belongsToThisWindow(event.surfaceView) else { return }
 
         guard let app = GhosttyAppController.shared.app else { return }
 
-        let direction = notification.userInfo?["direction"] as? ghostty_action_split_direction_e
         let splitDir: SplitDirection
-        switch direction {
+        switch event.direction {
         case GHOSTTY_SPLIT_DIRECTION_RIGHT, GHOSTTY_SPLIT_DIRECTION_LEFT:
             splitDir = .horizontal
         case GHOSTTY_SPLIT_DIRECTION_DOWN, GHOSTTY_SPLIT_DIRECTION_UP:
@@ -1016,12 +946,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             splitDir = .horizontal
         }
 
-        var config: ghostty_surface_config_s
-        if let inheritedConfig = notification.userInfo?["inherited_config"] as? ghostty_surface_config_s {
-            config = inheritedConfig
-        } else {
-            config = GhosttyFFI.surfaceConfigNew()
-        }
+        var config: ghostty_surface_config_s = event.inheritedConfig ?? GhosttyFFI.surfaceConfigNew()
         if let window = self.window {
             config.scale_factor = Double(window.backingScaleFactor)
         }
@@ -1042,11 +967,11 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func handleCloseSurfaceNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard let event = GhosttyCloseSurfaceEvent.from(notification) else { return }
 
         // Find the tab that owns this surface (may be a background tab)
-        guard let (owningTab, owningGroup) = findTab(for: surfaceView) else { return }
-        guard let surfaceID = owningTab.registry.id(for: surfaceView) else { return }
+        guard let (owningTab, owningGroup) = findTab(for: event.surfaceView) else { return }
+        guard let surfaceID = owningTab.registry.id(for: event.surfaceView) else { return }
 
         // Surface-level cleanup: update split tree and destroy surface
         let (newTree, focusTarget) = owningTab.splitTree.remove(surfaceID)
@@ -1084,15 +1009,13 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func handleGotoSplitNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard let event = GhosttyGotoSplitEvent.from(notification) else { return }
         guard let tab = activeTab else { return }
-        guard let surfaceID = tab.registry.id(for: surfaceView) else { return }
-        guard belongsToThisWindow(surfaceView) else { return }
-
-        let direction = notification.userInfo?["direction"] as? ghostty_action_goto_split_e
+        guard let surfaceID = tab.registry.id(for: event.surfaceView) else { return }
+        guard belongsToThisWindow(event.surfaceView) else { return }
 
         let focusDir: FocusDirection
-        switch direction {
+        switch event.direction {
         case GHOSTTY_GOTO_SPLIT_PREVIOUS: focusDir = .previous
         case GHOSTTY_GOTO_SPLIT_NEXT: focusDir = .next
         case GHOSTTY_GOTO_SPLIT_LEFT: focusDir = .spatial(.left)
@@ -1159,25 +1082,23 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func handleSetTitleNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
-        guard belongsToThisWindow(surfaceView) else { return }
-        guard let title = notification.userInfo?["title"] as? String else { return }
+        guard let event = GhosttySetTitleEvent.from(notification) else { return }
+        guard belongsToThisWindow(event.surfaceView) else { return }
         guard let tab = activeTab else { return }
 
         if let focusedID = tab.splitTree.focusedLeafID,
            let focusedView = tab.registry.view(for: focusedID),
-           focusedView === surfaceView {
-            window?.title = title
-            tab.title = title
+           focusedView === event.surfaceView {
+            window?.title = event.title
+            tab.title = event.title
         }
     }
 
     @objc private func handleSetPwdNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
-        guard belongsToThisWindow(surfaceView) else { return }
-        guard let pwd = notification.userInfo?["pwd"] as? String else { return }
-        guard let (owningTab, _) = findTab(for: surfaceView) else { return }
-        owningTab.pwd = pwd
+        guard let event = GhosttySetPwdEvent.from(notification) else { return }
+        guard belongsToThisWindow(event.surfaceView) else { return }
+        guard let (owningTab, _) = findTab(for: event.surfaceView) else { return }
+        owningTab.pwd = event.pwd
         requestSave()
     }
 
@@ -1445,7 +1366,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             // No special focus needed for diff tabs
         } else {
             focusedController?.setFocus(true)
-            restoreFocus()
+            focusManager.restoreFocus(window: window, tab: activeTab, splitContainerView: splitContainerView)
         }
     }
 
