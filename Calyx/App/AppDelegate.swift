@@ -55,6 +55,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let browserHandler = BrowserToolHandler(broker: browserTabBroker)
         BrowserServer.shared.toolHandler = browserHandler
         BrowserServer.shared.start()
+        startIPCIfNeeded()
         NSApp.servicesProvider = self
 
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
@@ -563,6 +564,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         var config = GhosttyFFI.surfaceConfigNew()
         config.scale_factor = Double(window.backingScaleFactor)
         return tab.registry.createSurface(app: app, config: config, pwd: tab.pwd)
+    }
+
+    // MARK: - IPC Auto-Start
+
+    private func startIPCIfNeeded() {
+        guard UserDefaults.standard.bool(forKey: "calyx.ipcAutoStart") else { return }
+        guard !CalyxMCPServer.shared.isRunning else { return }
+
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            logger.error("IPC auto-start: failed to generate token")
+            return
+        }
+        let token = bytes.map { String(format: "%02x", $0) }.joined()
+
+        do {
+            try CalyxMCPServer.shared.start(token: token)
+            let port = CalyxMCPServer.shared.port
+            let result = IPCConfigManager.enableIPC(port: port, token: token)
+            if result.anySucceeded {
+                logger.info("IPC auto-started on port \(port)")
+            } else {
+                logger.warning("IPC auto-start: server running on port \(port) but no agent configs written")
+            }
+        } catch {
+            logger.error("IPC auto-start failed: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Finder Services

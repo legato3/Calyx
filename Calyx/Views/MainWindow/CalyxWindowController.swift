@@ -1779,6 +1779,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 return
             }
 
+            UserDefaults.standard.set(true, forKey: "calyx.ipcAutoStart")
             showIPCAlert(
                 title: "IPC Enabled",
                 message: "MCP server running on port \(port).\n\(configStatusMessage(result))\nRestart agent instances to connect."
@@ -1789,6 +1790,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func disableIPC() {
+        UserDefaults.standard.set(false, forKey: "calyx.ipcAutoStart")
         CalyxMCPServer.shared.stop()
         let result = IPCConfigManager.disableIPC()
         showIPCAlert(

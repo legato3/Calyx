@@ -261,6 +261,9 @@ final class CalyxMCPServer {
         case "get_peer_status":
             return await handleGetPeerStatus(id: id, arguments: arguments)
 
+        case "heartbeat":
+            return await handleHeartbeat(id: id, arguments: arguments)
+
         default:
             return toolError(id: id, text: "Unknown tool: \(toolName)")
         }
@@ -299,13 +302,25 @@ final class CalyxMCPServer {
         guard let fromStr = arguments?["from"] as? String,
               let toStr = arguments?["to"] as? String,
               let content = arguments?["content"] as? String,
-              let fromUUID = UUID(uuidString: fromStr),
-              let toUUID = UUID(uuidString: toStr) else {
+              let fromUUID = UUID(uuidString: fromStr) else {
             return toolError(id: id, text: "Missing or invalid from/to/content")
         }
 
+        // Resolve 'to' as UUID or peer name
+        let toUUID: UUID
+        if let uuid = UUID(uuidString: toStr) {
+            toUUID = uuid
+        } else if let peer = await store.peer(named: toStr) {
+            toUUID = peer.id
+        } else {
+            return toolError(id: id, text: "Peer not found: \"\(toStr)\". Use list_peers to see available peers.")
+        }
+
+        let topic = arguments?["topic"] as? String
+        let replyTo = arguments?["reply_to"] as? String
+
         do {
-            let message = try await store.sendMessage(from: fromUUID, to: toUUID, content: content)
+            let message = try await store.sendMessage(from: fromUUID, to: toUUID, content: content, topic: topic, replyTo: replyTo)
             let json = "{\"messageId\":\"\(message.id.uuidString)\"}"
             return toolSuccess(id: id, text: json)
         } catch let error as IPCError {
@@ -325,8 +340,10 @@ final class CalyxMCPServer {
             return toolError(id: id, text: "Missing or invalid from/content")
         }
 
+        let topic = arguments?["topic"] as? String
+
         do {
-            let messages = try await store.broadcast(from: fromUUID, content: content)
+            let messages = try await store.broadcast(from: fromUUID, content: content, topic: topic)
             let json = "{\"messageCount\":\(messages.count)}"
             return toolSuccess(id: id, text: json)
         } catch let error as IPCError {
@@ -345,8 +362,17 @@ final class CalyxMCPServer {
             return toolError(id: id, text: "Missing or invalid peer_id")
         }
 
-        let messages = await store.receiveMessages(for: peerUUID)
-        let messageDicts: [[String: Any]] = messages.map { messageToDict($0) }
+        // Parse optional 'since' cursor
+        let since: Date? = (arguments?["since"] as? String).flatMap { Self.iso8601.date(from: $0) }
+        let topic = arguments?["topic"] as? String
+
+        let messages = await store.receiveMessages(for: peerUUID, since: since, topic: topic)
+
+        // Resolve sender names for all messages in one pass
+        let peers = await store.listPeers()
+        let peerNames: [UUID: String] = Dictionary(uniqueKeysWithValues: peers.map { ($0.id, $0.name) })
+
+        let messageDicts: [[String: Any]] = messages.map { messageToDict($0, fromName: peerNames[$0.from]) }
         let result: [String: Any] = ["messages": messageDicts]
         guard let jsonData = try? JSONSerialization.data(withJSONObject: result),
               let json = String(data: jsonData, encoding: .utf8) else {
@@ -392,6 +418,23 @@ final class CalyxMCPServer {
         return toolSuccess(id: id, text: json)
     }
 
+    private func handleHeartbeat(
+        id: JSONRPCId,
+        arguments: [String: Any]?
+    ) async -> (statusCode: Int, body: Data?) {
+        guard let peerStr = arguments?["peer_id"] as? String,
+              let peerUUID = UUID(uuidString: peerStr) else {
+            return toolError(id: id, text: "Missing or invalid peer_id")
+        }
+
+        let alive = await store.heartbeat(for: peerUUID)
+        guard alive else {
+            return toolError(id: id, text: "Peer not found or expired: \(peerUUID). Call register_peer to re-register.")
+        }
+        let json = "{\"status\":\"ok\"}"
+        return toolSuccess(id: id, text: json)
+    }
+
     // MARK: - Response Helpers
 
     private func unauthorizedResponse() -> (statusCode: Int, body: Data?) {
@@ -428,14 +471,18 @@ final class CalyxMCPServer {
         ]
     }
 
-    private func messageToDict(_ message: Message) -> [String: Any] {
-        [
+    private func messageToDict(_ message: Message, fromName: String? = nil) -> [String: Any] {
+        var dict: [String: Any] = [
             "id": message.id.uuidString,
             "from": message.from.uuidString,
             "to": message.to.uuidString,
             "content": message.content,
             "timestamp": Self.iso8601.string(from: message.timestamp),
         ]
+        if let fromName { dict["fromName"] = fromName }
+        if let topic = message.topic { dict["topic"] = topic }
+        if let replyTo = message.replyTo { dict["replyTo"] = replyTo }
+        return dict
     }
 
     // MARK: - AnyCodable Extraction Helpers

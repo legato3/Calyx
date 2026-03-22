@@ -101,6 +101,7 @@ targets:
       - sdk: Carbon.framework
       - sdk: WebKit.framework
       - sdk: UserNotifications.framework
+      - sdk: Charts.framework
       - package: Sparkle
       - target: CalyxCLI
         embed: false

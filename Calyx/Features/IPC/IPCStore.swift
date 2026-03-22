@@ -22,6 +22,8 @@ struct Message: Sendable, Codable {
     let to: UUID
     let content: String
     var timestamp: Date
+    let topic: String?
+    let replyTo: String?
 }
 
 // MARK: - Errors
@@ -60,10 +62,18 @@ actor IPCStore {
 
     // MARK: - Peer Management
 
-    /// Registers a new peer with the given name and role.
-    /// Returns the created `Peer` with a fresh UUID and timestamps.
+    /// Registers a peer with the given name and role.
+    /// If a non-expired peer with the same name already exists, bumps its `lastSeen` and returns it.
+    /// Otherwise creates a new peer with a fresh UUID.
     func registerPeer(name: String, role: String) -> Peer {
         let now = Date()
+        // Upsert: return existing peer if name matches and not expired
+        if let existing = peers.values.first(where: {
+            $0.name == name && now.timeIntervalSince($0.lastSeen) <= peerTTL
+        }) {
+            peers[existing.id]?.lastSeen = now
+            return peers[existing.id]!
+        }
         let peer = Peer(
             id: UUID(),
             name: name,
@@ -94,6 +104,15 @@ actor IPCStore {
         return Array(peers.values)
     }
 
+    /// Looks up a peer by name (case-insensitive). Returns nil if not found or expired.
+    func peer(named name: String) -> Peer? {
+        let lower = name.lowercased()
+        let now = Date()
+        return peers.values.first {
+            $0.name.lowercased() == lower && now.timeIntervalSince($0.lastSeen) <= peerTTL
+        }
+    }
+
     /// Returns the peer if it exists and has not TTL-expired.
     func peerStatus(id: UUID) -> Peer? {
         guard let peer = peers[id] else { return nil }
@@ -109,7 +128,13 @@ actor IPCStore {
     /// Sends a message from one peer to another.
     /// Validates that the sender is registered and the recipient exists.
     /// Updates the sender's `lastSeen`. Caps recipient inbox at `maxMessagesPerPeer`.
-    func sendMessage(from senderID: UUID, to recipientID: UUID, content: String) throws -> Message {
+    func sendMessage(
+        from senderID: UUID,
+        to recipientID: UUID,
+        content: String,
+        topic: String? = nil,
+        replyTo: String? = nil
+    ) throws -> Message {
         guard content.utf8.count <= maxContentSize else {
             throw IPCError.contentTooLarge
         }
@@ -125,7 +150,9 @@ actor IPCStore {
             from: senderID,
             to: recipientID,
             content: content,
-            timestamp: Date()
+            timestamp: Date(),
+            topic: topic,
+            replyTo: replyTo
         )
 
         inbox[recipientID, default: []].append(message)
@@ -144,7 +171,7 @@ actor IPCStore {
     /// Broadcasts a message from one peer to all other registered peers.
     /// Validates that the sender is registered.
     /// Returns the array of created messages.
-    func broadcast(from senderID: UUID, content: String) throws -> [Message] {
+    func broadcast(from senderID: UUID, content: String, topic: String? = nil) throws -> [Message] {
         guard content.utf8.count <= maxContentSize else {
             throw IPCError.contentTooLarge
         }
@@ -159,7 +186,9 @@ actor IPCStore {
                 from: senderID,
                 to: recipientID,
                 content: content,
-                timestamp: Date()
+                timestamp: Date(),
+                topic: topic,
+                replyTo: nil
             )
             inbox[recipientID, default: []].append(message)
 
@@ -176,12 +205,13 @@ actor IPCStore {
         return messages
     }
 
-    /// Returns all non-expired messages in a peer's inbox.
+    /// Returns non-expired messages in a peer's inbox.
+    /// Optionally filters by `since` (only messages newer than this date) and `topic`.
     /// Purges expired messages. Updates peer's `lastSeen`.
-    func receiveMessages(for peerID: UUID) -> [Message] {
+    func receiveMessages(for peerID: UUID, since: Date? = nil, topic: String? = nil) -> [Message] {
         let now = Date()
 
-        // Filter out expired messages
+        // Purge expired messages
         inbox[peerID] = inbox[peerID]?.filter { now.timeIntervalSince($0.timestamp) <= messageTTL }
 
         // Update peer's lastSeen
@@ -189,7 +219,23 @@ actor IPCStore {
             peers[peerID]?.lastSeen = now
         }
 
-        return inbox[peerID] ?? []
+        var messages = inbox[peerID] ?? []
+        if let since {
+            messages = messages.filter { $0.timestamp > since }
+        }
+        if let topic {
+            messages = messages.filter { $0.topic == topic }
+        }
+        return messages
+    }
+
+    /// Touches a peer's `lastSeen` to keep it alive without sending/receiving messages.
+    /// Returns false if the peer is not found or has expired.
+    @discardableResult
+    func heartbeat(for peerID: UUID) -> Bool {
+        guard peers[peerID] != nil else { return false }
+        peers[peerID]?.lastSeen = Date()
+        return true
     }
 
     /// Removes messages with the given IDs from a peer's inbox.

@@ -36,6 +36,7 @@ struct SidebarContentView: View {
             Picker("Mode", selection: $sidebarMode) {
                 Text("Tabs").tag(SidebarMode.tabs)
                 Text("Changes").tag(SidebarMode.changes)
+                Text("Usage").tag(SidebarMode.usage)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -85,7 +86,7 @@ struct SidebarContentView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .accessibilityIdentifier(AccessibilityID.Sidebar.newGroupButton)
-            } else {
+            } else if sidebarMode == .changes {
                 GitChangesView(
                     gitChangesState: gitChangesState,
                     gitEntries: gitEntries,
@@ -99,6 +100,9 @@ struct SidebarContentView: View {
                     onExpandCommit: onExpandCommit
                 )
                 .padding(.top, 10)
+            } else {
+                ClaudeUsageView()
+                    .padding(.top, 4)
             }
         }
         .frame(minWidth: SidebarLayout.minWidth)

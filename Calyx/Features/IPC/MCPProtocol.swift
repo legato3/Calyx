@@ -275,70 +275,85 @@ struct MCPRouter: Sendable {
         [
             MCPTool(
                 name: "register_peer",
-                description: "Register this Claude Code instance as a peer for IPC communication",
+                description: "Register this Claude Code instance as a peer for IPC communication. Call once per session — if a peer with the same name already exists and hasn't expired, your existing peer ID is returned instead of creating a duplicate.",
                 inputSchema: schema(
                     properties: [
-                        "name": prop("string", "Peer display name"),
-                        "role": prop("string", "Peer role"),
+                        "name": prop("string", "Peer display name — use something descriptive like your working directory or task (e.g. 'calyx-frontend', 'api-refactor')"),
+                        "role": prop("string", "Peer role describing your function (e.g. 'reviewer', 'implementer', 'orchestrator')"),
                     ],
                     required: ["name"]
                 )
             ),
             MCPTool(
                 name: "list_peers",
-                description: "List all registered peers",
+                description: "List all registered, non-expired peers. Use this to discover other Claude Code instances before sending messages.",
                 inputSchema: schema(properties: [:])
             ),
             MCPTool(
                 name: "send_message",
-                description: "Send a message to a specific peer",
+                description: "Send a message to a specific peer. The 'to' field accepts either a peer ID (UUID) or a peer name (case-insensitive). Optionally include a 'topic' for structured filtering and 'reply_to' (a message ID) to thread a reply.",
                 inputSchema: schema(
                     properties: [
-                        "from": prop("string", "Sender peer ID"),
-                        "to": prop("string", "Target peer ID"),
-                        "content": prop("string", "Message content"),
+                        "from": prop("string", "Your peer ID"),
+                        "to": prop("string", "Target peer ID or peer name"),
+                        "content": prop("string", "Message content (max 64KB)"),
+                        "topic": prop("string", "Optional topic label for filtering (e.g. 'review-request', 'task-complete', 'question')"),
+                        "reply_to": prop("string", "Optional message ID this is a reply to, for threading"),
                     ],
                     required: ["from", "to", "content"]
                 )
             ),
             MCPTool(
                 name: "broadcast",
-                description: "Broadcast a message to all other peers",
+                description: "Broadcast a message to all other registered peers (excludes the sender). Useful for announcements like task completion or status updates.",
                 inputSchema: schema(
                     properties: [
-                        "from": prop("string", "Sender peer ID"),
-                        "content": prop("string", "Message content"),
+                        "from": prop("string", "Your peer ID"),
+                        "content": prop("string", "Message content (max 64KB)"),
+                        "topic": prop("string", "Optional topic label (e.g. 'announcement', 'status')"),
                     ],
                     required: ["from", "content"]
                 )
             ),
             MCPTool(
                 name: "receive_messages",
-                description: "Receive pending messages for this peer",
+                description: "Receive pending messages for this peer. Messages expire after 5 minutes. Use 'since' as a cursor (ISO 8601 timestamp of the last message you received) to avoid re-processing old messages — no ack needed when using a cursor. Use 'topic' to filter to a specific message type.",
                 inputSchema: schema(
                     properties: [
                         "peer_id": prop("string", "Your peer ID"),
+                        "since": prop("string", "Optional ISO 8601 timestamp — only return messages newer than this (use as a cursor to avoid re-reading)"),
+                        "topic": prop("string", "Optional topic filter — only return messages with this topic"),
                     ],
                     required: ["peer_id"]
                 )
             ),
             MCPTool(
                 name: "ack_messages",
-                description: "Acknowledge and delete received messages",
+                description: "Explicitly delete specific messages from your inbox by ID. Optional when using the 'since' cursor on receive_messages — use this only when you want to remove messages before they expire.",
                 inputSchema: schema(
                     properties: [
-                        "peer_id": prop("string", "Peer ID"),
-                        "message_ids": arrayProp("string", "Message IDs to acknowledge"),
+                        "peer_id": prop("string", "Your peer ID"),
+                        "message_ids": arrayProp("string", "Message IDs to delete"),
                     ],
                     required: ["peer_id", "message_ids"]
                 )
             ),
             MCPTool(
                 name: "get_peer_status",
-                description: "Get status information for a specific peer",
+                description: "Get status information for a specific peer by ID, including name, role, and last activity time.",
                 inputSchema: schema(
                     properties: [
-                        "peer_id": prop("string", "Peer ID to check"),
+                        "peer_id": prop("string", "Peer ID to look up"),
+                    ],
+                    required: ["peer_id"]
+                )
+            ),
+            MCPTool(
+                name: "heartbeat",
+                description: "Signal that this peer is still active without sending a message. Call this periodically during long tasks to prevent your peer registration from expiring (TTL: 10 minutes).",
+                inputSchema: schema(
+                    properties: [
+                        "peer_id": prop("string", "Your peer ID"),
                     ],
                     required: ["peer_id"]
                 )
@@ -355,6 +370,14 @@ struct MCPRouter: Sendable {
     After completing any significant task, call receive_messages to check for messages from other peers. When you receive messages, process them and respond via send_message.
 
     Use list_peers to discover other connected instances. Use broadcast for announcements relevant to all peers.
+
+    Messaging tips:
+    - send_message accepts a peer name (e.g. "calyx-frontend") as the 'to' field — no need to look up the UUID first.
+    - Messages include 'fromName' so you know who sent them without a separate list_peers call.
+    - Use the 'topic' field to categorize messages (e.g. "review-request", "task-complete").
+    - Use 'reply_to' with the original message ID to thread replies.
+    - Pass 'since' (the timestamp of the last message you received) to receive_messages to avoid re-reading old messages.
+    - Call heartbeat periodically during long tasks to keep your peer registration alive (expires after 10 minutes of inactivity).
 
     Browser automation tools (browser_*) are available when browser scripting is enabled via the Command Palette. Use browser_snapshot to inspect pages and browser_click/browser_fill to interact with elements. Element refs (@e1, @e2) from snapshots can be used as selectors.
     """
