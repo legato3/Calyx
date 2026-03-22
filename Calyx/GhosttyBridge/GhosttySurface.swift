@@ -113,9 +113,19 @@ final class GhosttySurfaceController: Identifiable {
     deinit {
         // Surface must be freed on the main actor. Since deinit may run off main,
         // capture the surface value and dispatch.
+        //
+        // We also capture `surfaceView` to extend its lifetime until after
+        // surfaceFree returns. ghostty stores an unretained raw pointer to
+        // SurfaceView as surface userdata; if the view is deallocated before
+        // surfaceFree runs, any ghostty callback fired in that window will
+        // read a dangling pointer and crash. Holding the view here closes
+        // that race.
         if let surface {
+            let view = surfaceView
             Task.detached { @MainActor in
-                GhosttyFFI.surfaceFree(surface)
+                withExtendedLifetime(view) {
+                    GhosttyFFI.surfaceFree(surface)
+                }
             }
         }
     }
