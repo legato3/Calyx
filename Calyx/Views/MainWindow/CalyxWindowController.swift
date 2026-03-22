@@ -485,7 +485,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     // MARK: - Tab Operations
 
-    func createNewTab(inheritedConfig: Any? = nil) {
+    func createNewTab(inheritedConfig: Any? = nil, pwd: String? = nil) {
         guard let app = GhosttyAppController.shared.app,
               let window = self.window,
               let group = windowSession.activeGroup else { return }
@@ -500,7 +500,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
         config.scale_factor = Double(window.backingScaleFactor)
 
-        guard let surfaceID = tab.registry.createSurface(app: app, config: config) else {
+        guard let surfaceID = tab.registry.createSurface(app: app, config: config, pwd: pwd) else {
             logger.error("Failed to create surface for new tab")
             return
         }
@@ -924,6 +924,14 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                            name: .ghosttyGotoTab, object: nil)
         center.addObserver(self, selector: #selector(handleConfirmClipboardNotification(_:)),
                            name: .ghosttyConfirmClipboard, object: nil)
+        center.addObserver(self, selector: #selector(handleIPCEnableNotification(_:)),
+                           name: .calyxIPCEnable, object: nil)
+        center.addObserver(self, selector: #selector(handleIPCDisableNotification(_:)),
+                           name: .calyxIPCDisable, object: nil)
+        center.addObserver(self, selector: #selector(handleIPCLaunchWorkflowNotification(_:)),
+                           name: .calyxIPCLaunchWorkflow, object: nil)
+        center.addObserver(self, selector: #selector(handleIPCReviewRequestedNotification(_:)),
+                           name: .calyxIPCReviewRequested, object: nil)
     }
 
     // MARK: - Notification Handlers
@@ -1492,6 +1500,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             }
 
             UserDefaults.standard.set(true, forKey: "calyx.ipcAutoStart")
+            IPCAgentState.shared.startPolling()
             showIPCAlert(
                 title: "IPC Enabled",
                 message: "MCP server running on port \(port).\n\(configStatusMessage(result))\nRestart agent instances to connect."
@@ -1504,6 +1513,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private func disableIPC() {
         UserDefaults.standard.set(false, forKey: "calyx.ipcAutoStart")
         CalyxMCPServer.shared.stop()
+        IPCAgentState.shared.stopPolling()
+        IPCAgentState.shared.clearLog()
         let result = IPCConfigManager.disableIPC()
         showIPCAlert(
             title: "IPC Disabled",
@@ -1526,6 +1537,113 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             label(result.claudeCode, name: "Claude Code"),
             label(result.codex, name: "Codex")
         ].joined(separator: "\n")
+    }
+
+    // MARK: - IPC Notification Handlers
+
+    @objc private func handleIPCEnableNotification(_ notification: Notification) {
+        enableIPC()
+    }
+
+    @objc private func handleIPCDisableNotification(_ notification: Notification) {
+        disableIPC()
+    }
+
+    @objc private func handleIPCReviewRequestedNotification(_ notification: Notification) {
+        windowSession.sidebarMode = .changes
+        windowSession.showSidebar = true
+        gitController.refreshGitStatus()
+    }
+
+    @objc private func handleIPCLaunchWorkflowNotification(_ notification: Notification) {
+        guard let roleNames = notification.userInfo?["roleNames"] as? [String], !roleNames.isEmpty else { return }
+        let autoStart = (notification.userInfo?["autoStart"] as? Bool) ?? false
+        let sessionName = (notification.userInfo?["sessionName"] as? String) ?? ""
+        let initialTask = (notification.userInfo?["initialTask"] as? String) ?? ""
+        let port = CalyxMCPServer.shared.port
+
+        // Show folder picker before creating any tabs
+        let panel = NSOpenPanel()
+        panel.title = "Choose Session Directory"
+        panel.message = "All agent tabs will open in this folder."
+        panel.prompt = "Open"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+
+        // Default to the current tab's working directory if available
+        if let tabPwd = activeTab?.pwd {
+            panel.directoryURL = URL(fileURLWithPath: tabPwd)
+        }
+
+        guard panel.runModal() == .OK, let chosenURL = panel.url else { return }
+        let pwd = chosenURL.path
+
+        // Record workflow for "Rejoin Session"
+        IPCAgentState.shared.lastWorkflow = roleNames
+
+        // Name the active group if a session name was provided
+        if !sessionName.isEmpty {
+            windowSession.activeGroup?.name = sessionName
+        }
+
+        // Create all tabs and capture references before any async work
+        var createdTabs: [Tab] = []
+        for roleName in roleNames {
+            createNewTab(pwd: pwd)
+            if let newTab = windowSession.activeGroup?.tabs.last {
+                newTab.title = roleName
+                createdTabs.append(newTab)
+            }
+        }
+
+        // Broadcast initial task to all agents once they should be registered
+        if !initialTask.isEmpty && autoStart {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) {
+                Task { @MainActor in
+                    await CalyxMCPServer.shared.ensureAppPeerRegistered()
+                    guard let appPeerID = CalyxMCPServer.shared.appPeerID else { return }
+                    try? await CalyxMCPServer.shared.store.broadcast(
+                        from: appPeerID,
+                        content: initialTask,
+                        topic: "task"
+                    )
+                }
+            }
+        }
+
+        guard autoStart, createdTabs.count == roleNames.count else { return }
+
+        for (index, (tab, roleName)) in zip(createdTabs, roleNames).enumerated() {
+            let baseDelay = Double(index) * 0.15  // slight stagger so shells init independently
+
+            // Step 1: start claude once the shell is ready
+            DispatchQueue.main.asyncAfter(deadline: .now() + baseDelay + 0.8) { [weak self] in
+                guard let self,
+                      let leafID = tab.splitTree.focusedLeafID,
+                      let controller = tab.registry.controller(for: leafID) else { return }
+                controller.sendText("claude")
+                self.sendEnterKey(to: controller)
+
+                // Step 2: send role context after claude has initialised
+                let prompt = AgentWorkflow.rolePrompt(roleName: roleName, allRoles: roleNames, port: port)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
+                    guard let self,
+                          let leafID = tab.splitTree.focusedLeafID,
+                          let controller = tab.registry.controller(for: leafID) else { return }
+                    controller.sendText(prompt)
+                    // Two enters: first confirms claude's paste dialog, second submits
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                        guard let self else { return }
+                        self.sendEnterKey(to: controller)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            self.sendEnterKey(to: controller)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func sendReviewToAgent(_ payload: String) -> ReviewSendResult {

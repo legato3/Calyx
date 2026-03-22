@@ -563,4 +563,11 @@ extension Notification.Name {
     static let ghosttyGotoTab = Notification.Name("com.calyx.ghostty.gotoTab")
     static let glassOpacityDidChange = Notification.Name("com.calyx.glassOpacityDidChange")
     static let ghosttyConfirmClipboard = Notification.Name("com.calyx.ghostty.confirmClipboard")
+    // IPC / Agent GUI
+    static let calyxIPCEnable = Notification.Name("com.calyx.ipc.enable")
+    static let calyxIPCDisable = Notification.Name("com.calyx.ipc.disable")
+    /// userInfo: ["roleNames": [String], "autoStart": Bool, "sessionName": String, "initialTask": String]
+    static let calyxIPCLaunchWorkflow = Notification.Name("com.calyx.ipc.launchWorkflow")
+    /// Posted when any agent sends a message with topic "review-request"
+    static let calyxIPCReviewRequested = Notification.Name("com.calyx.ipc.reviewRequested")
 }

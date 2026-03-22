@@ -30,12 +30,14 @@ struct SidebarContentView: View {
     var onMoveTab: ((UUID, Int, Int) -> Void)?
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private var agentState: IPCAgentState { IPCAgentState.shared }
 
     var body: some View {
         VStack(spacing: 0) {
             Picker("Mode", selection: $sidebarMode) {
                 Text("Tabs").tag(SidebarMode.tabs)
                 Text("Changes").tag(SidebarMode.changes)
+                Text("Agents").tag(SidebarMode.agents)
                 Text("Usage").tag(SidebarMode.usage)
             }
             .pickerStyle(.segmented)
@@ -43,6 +45,24 @@ struct SidebarContentView: View {
             .padding(.horizontal, 12)
             .padding(.top, 8)
             .accessibilityIdentifier(AccessibilityID.Git.modeToggle)
+
+            // Unread agent message badge — tapping switches to Agents tab
+            if agentState.unreadCount > 0 && sidebarMode != .agents {
+                Button(action: { sidebarMode = .agents }) {
+                    Label(
+                        "\(agentState.unreadCount) new agent message\(agentState.unreadCount == 1 ? "" : "s")",
+                        systemImage: "bubble.left.fill"
+                    )
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
 
             if sidebarMode == .tabs {
                 ScrollView {
@@ -100,6 +120,9 @@ struct SidebarContentView: View {
                     onExpandCommit: onExpandCommit
                 )
                 .padding(.top, 10)
+            } else if sidebarMode == .agents {
+                IPCAgentsView()
+                    .padding(.top, 4)
             } else {
                 ClaudeUsageView()
                     .padding(.top, 4)

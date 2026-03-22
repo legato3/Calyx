@@ -574,6 +574,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             try CalyxMCPServer.shared.start(token: token)
             let port = CalyxMCPServer.shared.port
             let result = IPCConfigManager.enableIPC(port: port, token: token)
+            IPCAgentState.shared.startPolling()
             if result.anySucceeded {
                 logger.info("IPC auto-started on port \(port)")
             } else {

@@ -8,6 +8,7 @@ import Foundation
 enum SidebarMode: Sendable {
     case tabs
     case changes
+    case agents
     case usage
 }
 

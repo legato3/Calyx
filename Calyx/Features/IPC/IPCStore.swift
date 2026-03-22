@@ -244,6 +244,17 @@ actor IPCStore {
         inbox[peerID]?.removeAll { idSet.contains($0.id) }
     }
 
+    // MARK: - GUI Observation
+
+    /// Returns all non-expired messages across all inboxes without modifying any peer's lastSeen.
+    /// Intended for GUI display only — use receiveMessages for actual agent consumption.
+    func peekAllMessages() -> [Message] {
+        let now = Date()
+        return inbox.values.flatMap { msgs in
+            msgs.filter { now.timeIntervalSince($0.timestamp) <= messageTTL }
+        }.sorted { $0.timestamp < $1.timestamp }
+    }
+
     // MARK: - Cleanup
 
     /// Removes ALL peers and ALL inboxes.
