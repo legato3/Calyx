@@ -25,7 +25,7 @@ A macOS 26+ native terminal application built on [libghostty](https://github.com
 - **Ghostty config compatibility** -- reads `~/.config/ghostty/config` (most keys hot-reload on save; see Settings for Calyx-managed keys)
 - **Compose Overlay** -- floating text editor over the terminal for comfortable multiline input (`Cmd+Shift+E`), useful for writing long commands or AI prompts ([demo video](https://www.youtube.com/watch?v=qhwYnk8adF4))
 - **Quick Terminal** -- system-wide drop-down terminal toggled via global keybind
-- **Clipboard Confirmation** -- prompts before pasting large or multi-line content into the terminal
+- **Clipboard Confirmation** -- prompts before pasting potentially unsafe content (respects Ghostty's `clipboard-paste-protection` setting)
 - **Secure Keyboard Entry** -- prevents other apps from intercepting keystrokes (toggle via app menu)
 - **Auto-update** -- Sparkle-based updates for direct downloads (Homebrew installs use `brew upgrade`)
 

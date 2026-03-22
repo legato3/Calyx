@@ -54,8 +54,12 @@ class ClipboardConfirmationController: NSWindowController, NSWindowDelegate {
         guard !didComplete else { return }
         didComplete = true
 
-        contents.withCString { ptr in
-            GhosttyFFI.surfaceCompleteClipboardRequest(surface, data: ptr, state: state, confirmed: confirmed)
+        // Match Ghostty's behavior: always pass confirmed=true to avoid
+        // re-triggering unsafe paste detection. On cancel, send empty string
+        // so nothing is actually pasted.
+        let data = confirmed ? contents : ""
+        data.withCString { ptr in
+            GhosttyFFI.surfaceCompleteClipboardRequest(surface, data: ptr, state: state, confirmed: true)
         }
 
         if let parentWindow = window?.sheetParent {
