@@ -567,6 +567,55 @@ final class SessionPersistenceTests: XCTestCase {
                        "Snapshot should capture sidebarWidth from WindowSession")
     }
 
+    // MARK: - TabContent Round-Trip
+
+    /// Tab with .terminal content should survive Tab → snapshot → encode → decode → Tab(snapshot:).
+    @MainActor
+    func test_tabContent_terminal_roundtrip() throws {
+        let tab = Tab(id: UUID(), title: "Shell", pwd: "/home/user", content: .terminal)
+        let snap = tab.snapshot()
+
+        let data = try JSONEncoder().encode(snap)
+        let decoded = try JSONDecoder().decode(TabSnapshot.self, from: data)
+        let restored = Tab(snapshot: decoded)
+
+        if case .terminal = restored.content {
+            // expected
+        } else {
+            XCTFail("Restored tab should have .terminal content, got \(restored.content)")
+        }
+        XCTAssertEqual(restored.id, tab.id)
+        XCTAssertEqual(restored.title, tab.title)
+        XCTAssertEqual(restored.pwd, tab.pwd)
+    }
+
+    /// Tab with .browser content should survive Tab → snapshot → encode → decode → Tab(snapshot:).
+    @MainActor
+    func test_tabContent_browser_roundtrip() throws {
+        let url = URL(string: "https://example.com/path?q=1")!
+        let tab = Tab(id: UUID(), title: "Browser", pwd: nil, content: .browser(url: url))
+        let snap = tab.snapshot()
+
+        let data = try JSONEncoder().encode(snap)
+        let decoded = try JSONDecoder().decode(TabSnapshot.self, from: data)
+        let restored = Tab(snapshot: decoded)
+
+        if case .browser(let restoredURL) = restored.content {
+            XCTAssertEqual(restoredURL, url)
+        } else {
+            XCTFail("Restored tab should have .browser content, got \(restored.content)")
+        }
+        XCTAssertEqual(restored.id, tab.id)
+        XCTAssertEqual(restored.title, tab.title)
+    }
+
+    /// Tab with .diff content should not be persisted — snapshot() returns nil.
+    @MainActor
+    func test_tabContent_diff_excluded_from_persistence() {
+        let tab = Tab(content: .diff(source: .unstaged(path: "README.md", workDir: "/tmp/repo")))
+        XCTAssertNil(tab.snapshot(), ".diff tabs must not be persisted")
+    }
+
     /// Legacy sessions saved with minSidebarWidth=150 should be clamped up to 200.
     func test_sidebarWidth_legacy150_clamped_to_200() throws {
         let json = """

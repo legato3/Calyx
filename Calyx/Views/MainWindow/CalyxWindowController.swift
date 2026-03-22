@@ -24,6 +24,11 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private var clipboardConfirmationController: ClipboardConfirmationController?
     private var composeOverlayTargetSurfaceID: UUID?
     private let windowViewState = WindowViewState()
+    let mcpServer: CalyxMCPServer
+
+    // O(1) surface-to-tab reverse lookup. Rebuilt lazily after any structural change.
+    private var surfaceToTab: [UUID: (tab: Tab, group: TabGroup)] = [:]
+    private var surfaceToTabDirty = true
 
     // MARK: - Computed Properties
 
@@ -102,9 +107,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         self.init(window: window, windowSession: windowSession)
     }
 
-    init(window: NSWindow, windowSession: WindowSession, restoring: Bool = false) {
+    init(window: NSWindow, windowSession: WindowSession, restoring: Bool = false, mcpServer: CalyxMCPServer = .shared) {
         self.windowSession = windowSession
         self.isRestoring = restoring
+        self.mcpServer = mcpServer
         self.gitController = GitController(windowSession: windowSession)
         self.reviewController = ReviewController(windowSession: windowSession)
         super.init(window: window)
@@ -237,13 +243,13 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         commandRegistry.register(Command(id: "git.refresh", title: "Refresh Git Changes", category: "Git") { [weak self] in
             self?.gitController.refreshGitStatus()
         })
-        commandRegistry.register(Command(id: "ipc.enable", title: "Enable AI Agent IPC", category: "IPC", isAvailable: {
-            !CalyxMCPServer.shared.isRunning
+        commandRegistry.register(Command(id: "ipc.enable", title: "Enable AI Agent IPC", category: "IPC", isAvailable: { [weak self] in
+            !(self?.mcpServer.isRunning ?? false)
         }) { [weak self] in
             self?.enableIPC()
         })
-        commandRegistry.register(Command(id: "ipc.disable", title: "Disable AI Agent IPC", category: "IPC", isAvailable: {
-            CalyxMCPServer.shared.isRunning
+        commandRegistry.register(Command(id: "ipc.disable", title: "Disable AI Agent IPC", category: "IPC", isAvailable: { [weak self] in
+            self?.mcpServer.isRunning ?? false
         }) { [weak self] in
             self?.disableIPC()
         })
@@ -344,6 +350,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
 
         tab.splitTree = SplitTree(leafID: surfaceID)
+        invalidateSurfaceToTab()
 
         // Create a SplitContainerView bound to this tab's registry
         rebuildSplitContainer()
@@ -509,6 +516,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
 
         tab.splitTree = SplitTree(leafID: surfaceID)
+        invalidateSurfaceToTab()
 
         // Pause current tab
         activeTab?.registry.pauseAll()
@@ -611,6 +619,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         for surfaceID in tab.registry.allIDs {
             tab.registry.destroySurface(surfaceID)
         }
+        invalidateSurfaceToTab()
 
         let result = windowSession.removeTab(id: tabID, fromGroup: group.id)
 
@@ -673,6 +682,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
 
         tab.splitTree = SplitTree(leafID: surfaceID)
+        invalidateSurfaceToTab()
 
         // Pause current tab
         activeTab?.registry.pauseAll()
@@ -713,6 +723,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 tab.registry.destroySurface(surfaceID)
             }
         }
+        invalidateSurfaceToTab()
 
         let result = windowSession.removeGroup(id: group.id)
 
@@ -751,6 +762,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 tab.registry.destroySurface(surfaceID)
             }
         }
+        invalidateSurfaceToTab()
 
         let result = windowSession.removeGroup(id: groupID)
 
@@ -935,6 +947,24 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                            name: .calyxIPCLaunchWorkflow, object: nil)
         center.addObserver(self, selector: #selector(handleIPCReviewRequestedNotification(_:)),
                            name: .calyxIPCReviewRequested, object: nil)
+        center.addObserver(self, selector: #selector(handleCloseTabNotification(_:)),
+                           name: .ghosttyCloseTab, object: nil)
+        center.addObserver(self, selector: #selector(handleCloseWindowNotification(_:)),
+                           name: .ghosttyCloseWindow, object: nil)
+        center.addObserver(self, selector: #selector(handleToggleFullscreenNotification(_:)),
+                           name: .ghosttyToggleFullscreen, object: nil)
+        center.addObserver(self, selector: #selector(handleRingBellNotification(_:)),
+                           name: .ghosttyRingBell, object: nil)
+        center.addObserver(self, selector: #selector(handleShowChildExitedNotification(_:)),
+                           name: .ghosttyShowChildExited, object: nil)
+        center.addObserver(self, selector: #selector(handleRendererHealthNotification(_:)),
+                           name: .ghosttyRendererHealth, object: nil)
+        center.addObserver(self, selector: #selector(handleColorChangeNotification(_:)),
+                           name: .ghosttyColorChange, object: nil)
+        center.addObserver(self, selector: #selector(handleInitialSizeNotification(_:)),
+                           name: .ghosttyInitialSize, object: nil)
+        center.addObserver(self, selector: #selector(handleSizeLimitNotification(_:)),
+                           name: .ghosttySizeLimit, object: nil)
     }
 
     // MARK: - Notification Handlers
@@ -966,6 +996,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             logger.error("Failed to create split surface")
             return
         }
+        invalidateSurfaceToTab()
 
         let (newTree, _) = tab.splitTree.insert(at: surfaceID, direction: splitDir, newID: newSurfaceID)
         tab.splitTree = newTree
@@ -988,6 +1019,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         let (newTree, focusTarget) = owningTab.splitTree.remove(surfaceID)
         owningTab.registry.destroySurface(surfaceID)
         owningTab.splitTree = newTree
+        invalidateSurfaceToTab()
 
         // If closeTab is handling this tab, skip tab removal (closeTab will do it)
         if closingTabIDs.contains(owningTab.id) {
@@ -1184,6 +1216,83 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    @objc private func handleCloseTabNotification(_ notification: Notification) {
+        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard let (tab, group) = findTab(for: surfaceView) else { return }
+        let mode = notification.userInfo?["mode"] as? ghostty_action_close_tab_mode_e
+        switch mode {
+        case GHOSTTY_ACTION_CLOSE_TAB_MODE_OTHER:
+            // Close all tabs in the group except the one containing this surface
+            let otherIDs = group.tabs.filter { $0.id != tab.id }.map { $0.id }
+            otherIDs.forEach { closeTab(id: $0) }
+        case GHOSTTY_ACTION_CLOSE_TAB_MODE_RIGHT:
+            // Close all tabs to the right of this tab in the group
+            if let index = group.tabs.firstIndex(where: { $0.id == tab.id }) {
+                let rightIDs = group.tabs[group.tabs.index(after: index)...].map { $0.id }
+                rightIDs.forEach { closeTab(id: $0) }
+            }
+        default:
+            // GHOSTTY_ACTION_CLOSE_TAB_MODE_THIS or unknown
+            closeTab(id: tab.id)
+        }
+    }
+
+    @objc private func handleCloseWindowNotification(_ notification: Notification) {
+        if let surfaceView = notification.object as? SurfaceView {
+            guard findTab(for: surfaceView) != nil else { return }
+        }
+        window?.close()
+    }
+
+    @objc private func handleToggleFullscreenNotification(_ notification: Notification) {
+        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard findTab(for: surfaceView) != nil else { return }
+        window?.toggleFullScreen(nil)
+    }
+
+    @objc private func handleRingBellNotification(_ notification: Notification) {
+        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard findTab(for: surfaceView) != nil else { return }
+        NSSound.beep()
+    }
+
+    @objc private func handleShowChildExitedNotification(_ notification: Notification) {
+        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard let (tab, _) = findTab(for: surfaceView) else { return }
+        let exitCode = notification.userInfo?["exit_code"] as? UInt32 ?? 0
+        logger.info("[ChildExited] tab \(tab.id) exit_code=\(exitCode) — surface will close via ghosttyCloseSurface")
+    }
+
+    @objc private func handleRendererHealthNotification(_ notification: Notification) {
+        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard findTab(for: surfaceView) != nil else { return }
+        logger.warning("[RendererHealth] health changed for surface \(String(describing: ObjectIdentifier(surfaceView)))")
+    }
+
+    @objc private func handleColorChangeNotification(_ notification: Notification) {
+        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard belongsToThisWindow(surfaceView) else { return }
+        // Color changes sync the terminal background color to the window.
+        // Full implementation pending theme integration.
+        logger.debug("[ColorChange] received for surface \(String(describing: ObjectIdentifier(surfaceView)))")
+    }
+
+    @objc private func handleInitialSizeNotification(_ notification: Notification) {
+        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard belongsToThisWindow(surfaceView) else { return }
+        guard let width = notification.userInfo?["width"] as? UInt32,
+              let height = notification.userInfo?["height"] as? UInt32 else { return }
+        // width/height are in cells; pixel resize requires cell size from SurfaceView.
+        logger.debug("[InitialSize] requested \(width)×\(height) cells")
+    }
+
+    @objc private func handleSizeLimitNotification(_ notification: Notification) {
+        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard belongsToThisWindow(surfaceView) else { return }
+        // Size limits are in cells; pixel conversion requires cell size from SurfaceView.
+        logger.debug("[SizeLimit] received for surface \(String(describing: ObjectIdentifier(surfaceView)))")
+    }
+
     func applyCurrentGhosttyConfig() {
         guard let config = GhosttyAppController.shared.configManager.config else { return }
 
@@ -1350,15 +1459,24 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         view.window === self.window
     }
 
+    private func invalidateSurfaceToTab() {
+        surfaceToTabDirty = true
+    }
+
     private func findTab(for surfaceView: SurfaceView) -> (Tab, TabGroup)? {
-        for group in windowSession.groups {
-            for tab in group.tabs {
-                if tab.registry.id(for: surfaceView) != nil {
-                    return (tab, group)
+        guard let surfaceID = surfaceView.surfaceController?.id else { return nil }
+        if surfaceToTabDirty {
+            surfaceToTab.removeAll(keepingCapacity: true)
+            for group in windowSession.groups {
+                for tab in group.tabs {
+                    for id in tab.registry.allIDs {
+                        surfaceToTab[id] = (tab, group)
+                    }
                 }
             }
+            surfaceToTabDirty = false
         }
-        return nil
+        return surfaceToTab[surfaceID]
     }
 
     private var focusedController: GhosttySurfaceController? {
@@ -1497,14 +1615,14 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             let token = SecurityUtils.generateHexToken()
 
             // Start server first to get the port
-            try CalyxMCPServer.shared.start(token: token)
-            let port = CalyxMCPServer.shared.port
+            try mcpServer.start(token: token)
+            let port = mcpServer.port
 
             // Write config to all available agent tools
             let result = IPCConfigManager.enableIPC(port: port, token: token)
 
             if !result.anySucceeded {
-                CalyxMCPServer.shared.stop()
+                mcpServer.stop()
                 showIPCAlert(
                     title: "IPC Error",
                     message: "MCP server running on port \(port).\nNo agent configs found. Configure manually if needed."
@@ -1525,7 +1643,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     private func disableIPC() {
         UserDefaults.standard.set(false, forKey: "calyx.ipcAutoStart")
-        CalyxMCPServer.shared.stop()
+        mcpServer.stop()
         IPCAgentState.shared.stopPolling()
         IPCAgentState.shared.clearLog()
         let result = IPCConfigManager.disableIPC()
@@ -1573,7 +1691,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         let autoStart = (notification.userInfo?["autoStart"] as? Bool) ?? false
         let sessionName = (notification.userInfo?["sessionName"] as? String) ?? ""
         let initialTask = (notification.userInfo?["initialTask"] as? String) ?? ""
-        let port = CalyxMCPServer.shared.port
+        let port = mcpServer.port
 
         // Show folder picker before creating any tabs
         let panel = NSOpenPanel()
@@ -1615,9 +1733,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         if !initialTask.isEmpty && autoStart {
             DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) {
                 Task { @MainActor in
-                    await CalyxMCPServer.shared.ensureAppPeerRegistered()
-                    guard let appPeerID = CalyxMCPServer.shared.appPeerID else { return }
-                    try? await CalyxMCPServer.shared.store.broadcast(
+                    await self.mcpServer.ensureAppPeerRegistered()
+                    guard let appPeerID = self.mcpServer.appPeerID else { return }
+                    try? await self.mcpServer.store.broadcast(
                         from: appPeerID,
                         content: initialTask,
                         topic: "task"

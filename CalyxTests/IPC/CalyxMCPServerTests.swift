@@ -220,7 +220,7 @@ final class CalyxMCPServerTests: XCTestCase {
                        "instructions must not be empty")
     }
 
-    // 5. "tools/list" → result with 7 tools
+    // 5. "tools/list" → result with 8 tools
     func test_handleJSONRPC_toolsList_returnsAllTools() async throws {
         // Arrange
         let data = makeRequest(method: "tools/list")
@@ -234,16 +234,17 @@ final class CalyxMCPServerTests: XCTestCase {
 
         let tools = try XCTUnwrap(result["tools"] as? [[String: Any]],
                                   "tools/list result must contain 'tools' array")
-        XCTAssertEqual(tools.count, 7,
-                       "tools/list must return exactly 7 tools")
+        XCTAssertEqual(tools.count, 8,
+                       "tools/list must return exactly 8 tools")
 
         let toolNames = Set(tools.compactMap { $0["name"] as? String })
         let expectedNames: Set<String> = [
             "register_peer", "list_peers", "send_message",
             "broadcast", "receive_messages", "ack_messages", "get_peer_status",
+            "heartbeat",
         ]
         XCTAssertEqual(toolNames, expectedNames,
-                       "tools/list must return the 7 expected tool names")
+                       "tools/list must return the 8 expected tool names")
     }
 
     // 6. Unknown method → error code -32601

@@ -6,7 +6,6 @@ import QuartzCore
 @MainActor
 final class FocusManager {
     private var focusRequestID: UInt64 = 0
-    private static let focusRestoreTimeout: Double = 0.5
 
     // MARK: - Public API
 
@@ -14,12 +13,10 @@ final class FocusManager {
     func restoreFocus(window: NSWindow?, tab: Tab?, splitContainerView: SplitContainerView?) {
         focusRequestID &+= 1
         let requestID = focusRequestID
-        let startTime = CACurrentMediaTime()
 
         DispatchQueue.main.async { [weak self] in
             self?.attemptFocusRestore(
                 requestID: requestID,
-                startTime: startTime,
                 window: window,
                 tab: tab,
                 splitContainerView: splitContainerView
@@ -50,14 +47,11 @@ final class FocusManager {
 
     private func attemptFocusRestore(
         requestID: UInt64,
-        startTime: Double,
         window: NSWindow?,
         tab: Tab?,
         splitContainerView: SplitContainerView?
     ) {
         guard requestID == focusRequestID else { return }
-
-        let elapsed = CACurrentMediaTime() - startTime
 
         // Non-key window → skip; windowDidBecomeKey will call restoreFocus()
         guard window?.isKeyWindow == true else { return }
@@ -69,26 +63,13 @@ final class FocusManager {
         let inWindow = focusView.window === window
         let hasSuperview = focusView.superview != nil
 
-        // View must be attached to THIS window's hierarchy
+        // View must be attached to THIS window's hierarchy. If not, wait for the
+        // next layout pass rather than busy-polling with a timing-dependent loop.
         guard inWindow, hasSuperview else {
-            guard elapsed < Self.focusRestoreTimeout else {
-                splitContainerView?.onDeferredLayoutComplete = { [weak self] in
-                    guard let self, requestID == self.focusRequestID else { return }
-                    self.attemptFocusRestore(
-                        requestID: requestID,
-                        startTime: CACurrentMediaTime(),
-                        window: window,
-                        tab: tab,
-                        splitContainerView: splitContainerView
-                    )
-                }
-                return
-            }
-            // Retry with 10ms backoff
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
-                self?.attemptFocusRestore(
+            splitContainerView?.onDeferredLayoutComplete = { [weak self] in
+                guard let self, requestID == self.focusRequestID else { return }
+                self.attemptFocusRestore(
                     requestID: requestID,
-                    startTime: startTime,
                     window: window,
                     tab: tab,
                     splitContainerView: splitContainerView

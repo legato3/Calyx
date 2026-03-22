@@ -10,34 +10,34 @@ import Testing
 struct DiffTabLifecycleTests {
     @Test func gitChangesStateTransitions() {
         let session = WindowSession()
-        if case .notLoaded = session.gitChangesState {} else {
+        if case .notLoaded = session.git.changesState {} else {
             Issue.record("Expected initial state .notLoaded")
         }
 
-        session.gitChangesState = .loading
-        if case .loading = session.gitChangesState {} else {
+        session.git.changesState = .loading
+        if case .loading = session.git.changesState {} else {
             Issue.record("Expected .loading")
         }
 
-        session.gitChangesState = .loaded
-        if case .loaded = session.gitChangesState {} else {
+        session.git.changesState = .loaded
+        if case .loaded = session.git.changesState {} else {
             Issue.record("Expected .loaded")
         }
     }
 
     @Test func gitChangesStateNotRepository() {
         let session = WindowSession()
-        session.gitChangesState = .loading
-        session.gitChangesState = .notRepository
-        if case .notRepository = session.gitChangesState {} else {
+        session.git.changesState = .loading
+        session.git.changesState = .notRepository
+        if case .notRepository = session.git.changesState {} else {
             Issue.record("Expected .notRepository")
         }
     }
 
     @Test func gitChangesStateError() {
         let session = WindowSession()
-        session.gitChangesState = .error("test error")
-        if case .error(let msg) = session.gitChangesState {
+        session.git.changesState = .error("test error")
+        if case .error(let msg) = session.git.changesState {
             #expect(msg == "test error")
         } else {
             Issue.record("Expected .error")

@@ -103,7 +103,7 @@ final class MCPProtocolTests: XCTestCase {
                      "nil instructions must remain nil after roundtrip")
     }
 
-    // ==================== 2. Tools List — All 7 Tools ====================
+    // ==================== 2. Tools List — All 8 Tools ====================
 
     func test_toolsListResponse_containsAllTools() throws {
         // Arrange
@@ -111,6 +111,7 @@ final class MCPProtocolTests: XCTestCase {
         let expectedToolNames: Set<String> = [
             "register_peer", "list_peers", "send_message",
             "broadcast", "receive_messages", "ack_messages", "get_peer_status",
+            "heartbeat",
         ]
 
         // Act
@@ -128,9 +129,9 @@ final class MCPProtocolTests: XCTestCase {
 
         let actualNames = Set(toolsResult.tools.map(\.name))
         XCTAssertEqual(actualNames, expectedToolNames,
-                       "Tools list must contain exactly the 7 expected tools")
-        XCTAssertEqual(toolsResult.tools.count, 7,
-                       "Tools list must contain exactly 7 tools")
+                       "Tools list must contain exactly the 8 expected tools")
+        XCTAssertEqual(toolsResult.tools.count, 8,
+                       "Tools list must contain exactly 8 tools")
     }
 
     // ==================== 3. register_peer Schema ====================
@@ -389,13 +390,13 @@ final class MCPProtocolTests: XCTestCase {
 
     // ==================== Supplementary: MCPRouter.tools Static Property ====================
 
-    func test_router_tools_staticProperty_returns7Tools() {
+    func test_router_tools_staticProperty_returns8Tools() {
         // Act
         let tools = MCPRouter.tools
 
         // Assert
-        XCTAssertEqual(tools.count, 7,
-                       "MCPRouter.tools must expose exactly 7 tool definitions")
+        XCTAssertEqual(tools.count, 8,
+                       "MCPRouter.tools must expose exactly 8 tool definitions")
 
         let names = tools.map(\.name)
         // IPC tools
@@ -406,6 +407,7 @@ final class MCPProtocolTests: XCTestCase {
         XCTAssertTrue(names.contains("receive_messages"))
         XCTAssertTrue(names.contains("ack_messages"))
         XCTAssertTrue(names.contains("get_peer_status"))
+        XCTAssertTrue(names.contains("heartbeat"))
     }
 
     // ==================== Supplementary: AnyCodable Basics ====================
