@@ -92,6 +92,14 @@ final class SurfaceRegistry {
         entry.view.removeFromSuperview()
         entry.controller.requestClose()
 
+        // Free the ghostty surface synchronously before releasing the registry entry.
+        // The entry's `view` holds the only strong reference to SurfaceView; removing
+        // the entry below would free the view while ghostty still has an unretained raw
+        // pointer to it as surface userdata. Calling freeSurface() here — while the
+        // entry (and therefore the view) is still alive — ensures no callbacks can fire
+        // for a dead surface after the entry is released.
+        entry.controller.freeSurface()
+
         entries.removeValue(forKey: id)
         logger.info("Surface destroyed: \(id)")
     }

@@ -111,23 +111,23 @@ final class GhosttySurfaceController: Identifiable {
     }
 
     deinit {
-        // Surface must be freed on the main actor. Since deinit may run off main,
-        // capture the surface value and dispatch.
-        //
-        // We also capture `surfaceView` to extend its lifetime until after
-        // surfaceFree returns. ghostty stores an unretained raw pointer to
-        // SurfaceView as surface userdata; if the view is deallocated before
-        // surfaceFree runs, any ghostty callback fired in that window will
-        // read a dangling pointer and crash. Holding the view here closes
-        // that race.
+        // freeSurface() should have already been called by SurfaceRegistry.destroySurface
+        // on the main actor before the registry entry was released. If surface is still
+        // set here it means destroySurface was bypassed — free it as a fallback.
         if let surface {
-            let view = surfaceView
             Task.detached { @MainActor in
-                withExtendedLifetime(view) {
-                    GhosttyFFI.surfaceFree(surface)
-                }
+                GhosttyFFI.surfaceFree(surface)
             }
         }
+    }
+
+    /// Free the underlying ghostty surface synchronously.
+    /// Must be called on the main actor (guaranteed when invoked from SurfaceRegistry.destroySurface).
+    /// Clears `surface` so the deinit fallback is a no-op.
+    func freeSurface() {
+        guard let s = surface else { return }
+        surface = nil
+        GhosttyFFI.surfaceFree(s)
     }
 
     // MARK: - Size & Scale
