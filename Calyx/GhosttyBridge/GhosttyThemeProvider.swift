@@ -12,6 +12,7 @@ final class GhosttyThemeProvider {
     static let shared = GhosttyThemeProvider()
 
     private(set) var ghosttyBackground: NSColor = ThemeColorPreset.ghostty.color
+    private(set) var ghosttyForeground: NSColor = .white
     nonisolated(unsafe) private var observer: Any?
 
     private init() {
@@ -32,6 +33,7 @@ final class GhosttyThemeProvider {
     private func refreshFromConfig() {
         guard let raw = GhosttyAppController.shared.configManager.getColor("background") else {
             ghosttyBackground = ThemeColorPreset.ghostty.color
+            ghosttyForeground = .white
             return
         }
         ghosttyBackground = NSColor(
@@ -40,5 +42,16 @@ final class GhosttyThemeProvider {
             blue: CGFloat(raw.b) / 255.0,
             alpha: 1.0
         )
+
+        if let fg = GhosttyAppController.shared.configManager.getColor("foreground") {
+            ghosttyForeground = NSColor(
+                red: CGFloat(fg.r) / 255.0,
+                green: CGFloat(fg.g) / 255.0,
+                blue: CGFloat(fg.b) / 255.0,
+                alpha: 1.0
+            )
+        } else {
+            ghosttyForeground = .white
+        }
     }
 }

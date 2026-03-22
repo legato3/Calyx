@@ -167,6 +167,9 @@ private struct SidebarBackgroundModifier: ViewModifier {
                     .allowsHitTesting(false)
                 }
                 .environment(\.colorScheme, chromeScheme)
+                .foregroundStyle(themePreset == "ghostty"
+                    ? AnyShapeStyle(Color(nsColor: ghosttyProvider.ghosttyForeground))
+                    : AnyShapeStyle(.primary))
         }
     }
 }

@@ -342,6 +342,9 @@ private struct TabBarBackgroundModifier: ViewModifier {
                         .frame(height: 18)
                 }
                 .environment(\.colorScheme, chromeScheme)
+                .foregroundStyle(themePreset == "ghostty"
+                    ? AnyShapeStyle(Color(nsColor: ghosttyProvider.ghosttyForeground))
+                    : AnyShapeStyle(.primary))
         }
     }
 }
