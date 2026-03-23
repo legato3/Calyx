@@ -118,6 +118,31 @@ struct AnyCodable: @unchecked Sendable, Codable, Equatable {
         }
     }
 
+    // MARK: Value Accessors
+
+    var stringValue: String? {
+        if case .string(let s) = storage { return s }
+        return nil
+    }
+
+    var dictionaryValue: [String: Any]? {
+        guard case .dictionary(let d) = storage else { return nil }
+        return d.compactMapValues { $0.rawValue }
+    }
+
+    /// Unwraps the stored value to a plain Swift/Foundation type.
+    var rawValue: Any? {
+        switch storage {
+        case .string(let v): return v
+        case .int(let v): return v
+        case .double(let v): return v
+        case .bool(let v): return v
+        case .null: return nil
+        case .array(let v): return v.compactMap { $0.rawValue }
+        case .dictionary: return dictionaryValue
+        }
+    }
+
     // MARK: Internal Helpers
 
     /// Convert any Encodable value to AnyCodable via JSON serialization roundtrip.

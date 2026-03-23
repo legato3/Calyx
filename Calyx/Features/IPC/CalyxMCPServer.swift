@@ -489,23 +489,12 @@ final class CalyxMCPServer {
 
     /// Extract a string value from an AnyCodable dictionary.
     private func extractString(_ dict: [String: AnyCodable], _ key: String) -> String? {
-        guard let value = dict[key] else { return nil }
-        // Encode the AnyCodable to JSON, then decode as a plain string
-        guard let data = try? JSONEncoder().encode(value),
-              let str = try? JSONDecoder().decode(String.self, from: data) else {
-            return nil
-        }
-        return str
+        dict[key]?.stringValue
     }
 
     /// Extract a [String: Any] dictionary from an AnyCodable value at the given key.
     private func extractDict(_ dict: [String: AnyCodable], _ key: String) -> [String: Any]? {
-        guard let value = dict[key] else { return nil }
-        guard let data = try? JSONEncoder().encode(value),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-        return obj
+        dict[key]?.dictionaryValue
     }
 
     /// Extract the client name from an initialize request's clientInfo.

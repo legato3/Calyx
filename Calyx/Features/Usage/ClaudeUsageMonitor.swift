@@ -86,6 +86,7 @@ final class ClaudeUsageMonitor {
     }
 
     private var watchSource: DispatchSourceFileSystemObject?
+    private var reloadDebounce: DispatchWorkItem?
 
     // MARK: - Lifecycle
 
@@ -171,7 +172,13 @@ final class ClaudeUsageMonitor {
             eventMask: [.write, .link],
             queue: .main
         )
-        src.setEventHandler { [weak self] in self?.reload() }
+        src.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.reloadDebounce?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.reload() }
+            self.reloadDebounce = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
+        }
         src.setCancelHandler { close(fd) }
         src.resume()
         watchSource = src

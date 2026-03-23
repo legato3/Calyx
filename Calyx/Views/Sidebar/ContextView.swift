@@ -202,6 +202,8 @@ final class ContextViewModel {
 
     private var watchSource: DispatchSourceFileSystemObject?
     private var memWatchSource: DispatchSourceFileSystemObject?
+    private var fileDebounce: DispatchWorkItem?
+    private var memDebounce: DispatchWorkItem?
 
     func resolveAndLoad(pwd: String?) {
         stopWatching()
@@ -278,8 +280,17 @@ final class ContextViewModel {
                     fileDescriptor: fd, eventMask: [.write, .delete], queue: .main
                 )
                 src.setEventHandler { [weak self] in
-                    self?.claudeMDContent =
-                        (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+                    guard let self else { return }
+                    self.fileDebounce?.cancel()
+                    let work = DispatchWorkItem { [weak self] in
+                        guard let self else { return }
+                        Task.detached(priority: .utility) {
+                            let content = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+                            await MainActor.run { [weak self] in self?.claudeMDContent = content }
+                        }
+                    }
+                    self.fileDebounce = work
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
                 }
                 src.setCancelHandler { close(fd) }
                 src.resume()
@@ -294,7 +305,13 @@ final class ContextViewModel {
             let src = DispatchSource.makeFileSystemObjectSource(
                 fileDescriptor: fd, eventMask: [.write, .link], queue: .main
             )
-            src.setEventHandler { [weak self] in self?.loadMemoryFiles(pwd: pwd) }
+            src.setEventHandler { [weak self] in
+                guard let self else { return }
+                self.memDebounce?.cancel()
+                let work = DispatchWorkItem { [weak self] in self?.loadMemoryFiles(pwd: pwd) }
+                self.memDebounce = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+            }
             src.setCancelHandler { close(fd) }
             src.resume()
             memWatchSource = src
@@ -306,6 +323,10 @@ final class ContextViewModel {
         watchSource = nil
         memWatchSource?.cancel()
         memWatchSource = nil
+        fileDebounce?.cancel()
+        fileDebounce = nil
+        memDebounce?.cancel()
+        memDebounce = nil
     }
 
     private func setTemporaryMessage(_ msg: String) {

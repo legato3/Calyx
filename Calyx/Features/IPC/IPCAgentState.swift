@@ -83,7 +83,9 @@ final class IPCAgentState {
             }
         }
         if activityLog.count > Self.maxLogSize {
-            activityLog.removeFirst(activityLog.count - Self.maxLogSize)
+            let excess = activityLog.count - Self.maxLogSize
+            for msg in activityLog.prefix(excess) { seenMessageIDs.remove(msg.id) }
+            activityLog.removeFirst(excess)
         }
         return new.count
     }

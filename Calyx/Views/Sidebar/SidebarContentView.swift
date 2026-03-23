@@ -629,6 +629,7 @@ private struct TabRowItemView: View {
                             claudePulse = true
                         }
                     }
+                    .onDisappear { claudePulse = false }
                     .help("Claude Code is running in this tab")
             }
             Text(tab.title.isEmpty ? fallbackTitle : tab.title)

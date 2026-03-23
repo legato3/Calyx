@@ -1155,7 +1155,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         if let focusedID = tab.splitTree.focusedLeafID,
            let focusedView = tab.registry.view(for: focusedID),
-           focusedView === event.surfaceView {
+           focusedView === event.surfaceView,
+           tab.title != event.title {
             window?.title = event.title
             tab.title = event.title
         }
@@ -1165,6 +1166,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         guard let event = GhosttySetPwdEvent.from(notification) else { return }
         guard belongsToThisWindow(event.surfaceView) else { return }
         guard let (owningTab, _) = findTab(for: event.surfaceView) else { return }
+        guard owningTab.pwd != event.pwd else { return }
         owningTab.pwd = event.pwd
         requestSave()
     }
@@ -1465,10 +1467,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func requestSave() {
-        DispatchQueue.main.async {
-            if let appDelegate = NSApp.delegate as? AppDelegate {
-                appDelegate.requestSave()
-            }
+        if let appDelegate = NSApp.delegate as? AppDelegate {
+            appDelegate.requestSave()
         }
     }
 
