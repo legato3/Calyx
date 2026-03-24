@@ -7,6 +7,14 @@ import QuartzCore
 final class FocusManager {
     private var focusRequestID: UInt64 = 0
 
+    /// Called when `makeFirstResponder` fails after layout is complete.
+    /// Owner should use this to show a visual "click to focus" indicator.
+    var onFocusFailed: (() -> Void)?
+
+    /// Called when `makeFirstResponder` succeeds.
+    /// Owner should use this to clear any focus-lost indicator.
+    var onFocusRestored: (() -> Void)?
+
     // MARK: - Public API
 
     /// Schedules an async focus-restore cycle. Call after every tab switch or split.
@@ -39,6 +47,7 @@ final class FocusManager {
         tab.registry.controller(for: focusedID)?.setFocus(true)
         tab.registry.controller(for: focusedID)?.refresh()
         focusView.needsDisplay = true
+        onFocusRestored?()
         tab.clearUnreadNotifications()
         return true
     }
@@ -84,6 +93,10 @@ final class FocusManager {
             tab.registry.controller(for: focusedID)?.refresh()
             focusView.needsDisplay = true
             tab.clearUnreadNotifications()
+            onFocusRestored?()
+        } else {
+            logger.warning("makeFirstResponder failed for surface \(focusedID) — triggering focus-lost indicator")
+            onFocusFailed?()
         }
     }
 }

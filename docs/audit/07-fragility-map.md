@@ -33,22 +33,13 @@ struct GhosttyNewSplitEvent {
 }
 ```
 
-## 2. Session Persistence Spin-Loops
+## 2. ✅ Session Persistence Spin-Loops (fixed)
 
-### Why fragile
-`applicationWillTerminate` uses a spin-loop with a 1-second deadline to save. `restoreSession` uses a 2-second spin-loop. Both block the main thread and can silently fail.
+### What was fragile
+`applicationWillTerminate` used a spin-loop with a 1-second deadline to save. `restoreSession` used a 2-second spin-loop. Both blocked the main thread and could silently fail.
 
-### What breaks it
-Any async operation in `SessionPersistenceActor.performSave()` that takes longer than expected (large session, slow disk, macOS sandbox delays).
-
-### Symptoms
-Session not restored after quit. User loses all tab/window state. No error message shown.
-
-### Stabilize
-- Save session on every meaningful state change (already done via `requestSave()` -- this is the primary safety net)
-- Make the terminate-time save best-effort and rely on the debounced saves
-- Consider moving session persistence to a synchronous JSON write in `applicationWillTerminate` (avoiding the actor entirely at shutdown)
-- The crash-loop detection (`SessionPersistenceActor.maxRecoveryAttempts = 3`) is already a good fallback
+### Fix
+Marked `savePath`, `backupPath`, `recoveryMarkerPath` as `nonisolated(unsafe)` (write-once in init). Made `restore()`, `migrateFromLegacyPath()`, `loadFromPath()`, and all recovery counter methods `nonisolated`. Added `saveImmediatelySync()` for the shutdown path. All spin-loops in `AppDelegate` replaced with direct synchronous calls.
 
 ## 3. Focus Management Retry Loop
 
@@ -62,13 +53,14 @@ Session not restored after quit. User loses all tab/window state. No error messa
 - Multiple rapid tab switches (focus request ID invalidation)
 
 ### Symptoms
-Terminal pane visible but not accepting keyboard input. User must click to re-focus. No visual indication that focus is lost.
+Terminal pane visible but not accepting keyboard input. User must click to re-focus.
 
-### Stabilize
+### ✅ Partial fix
+Added `onFocusFailed`/`onFocusRestored` callbacks to `FocusManager`. When `makeFirstResponder` fails, an amber border appears on `SplitContainerView` (via `CALayer.borderColor`). Cleared automatically when the user clicks or focus is successfully restored. Failure is now logged at `warning` level.
+
+### Remaining
 - Add a `windowDidUpdate` or `viewDidLayout` observer as a final fallback
 - Use `NSView.viewDidMoveToWindow` callback instead of polling
-- Add a visual indicator when the terminal lacks focus (subtle border or cursor change)
-- Log focus failures to help diagnose timing issues
 
 ## 4. GhosttyAppController Singleton + C Callbacks
 

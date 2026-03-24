@@ -113,16 +113,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let snapshot = buildSnapshot()
-        var done = false
-        Task {
-            await SessionPersistenceActor.shared.saveImmediately(snapshot)
-            await SessionPersistenceActor.shared.resetRecoveryCounter()
-            done = true
-        }
-        let deadline = Date().addingTimeInterval(1.0)
-        while !done, Date() < deadline {
-            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
-        }
+        SessionPersistenceActor.shared.saveImmediatelySync(snapshot)
+        SessionPersistenceActor.shared.resetRecoveryCounter()
         windowControllers.removeAll()
     }
 
@@ -398,15 +390,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func saveImmediately() {
         let snapshot = buildSnapshot()
-        var done = false
-        Task {
-            await SessionPersistenceActor.shared.saveImmediately(snapshot)
-            done = true
-        }
-        let deadline = Date().addingTimeInterval(1.0)
-        while !done, Date() < deadline {
-            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
-        }
+        SessionPersistenceActor.shared.saveImmediatelySync(snapshot)
     }
 
     private func buildSnapshot() -> SessionSnapshot {
@@ -416,30 +400,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func restoreSession() -> Bool {
-        // Crash-loop detection
-        var recoveryCount = 0
-        var snapshot: SessionSnapshot?
-        var done = false
+        let recoveryCount = SessionPersistenceActor.shared.incrementRecoveryCounter()
 
-        Task {
-            recoveryCount = await SessionPersistenceActor.shared.incrementRecoveryCounter()
-            if recoveryCount <= SessionPersistenceActor.maxRecoveryAttempts {
-                snapshot = await SessionPersistenceActor.shared.restore()
-            }
-            done = true
-        }
-        let deadline = Date().addingTimeInterval(2.0)
-        while !done, Date() < deadline {
-            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
-        }
-
-        guard let snapshot, !snapshot.windows.isEmpty else {
-            logger.info("No session to restore (count=\(recoveryCount))")
+        guard recoveryCount <= SessionPersistenceActor.maxRecoveryAttempts else {
+            logger.warning("Crash loop detected (\(recoveryCount) attempts), skipping restore")
             return false
         }
 
-        if recoveryCount > SessionPersistenceActor.maxRecoveryAttempts {
-            logger.warning("Crash loop detected (\(recoveryCount) attempts), skipping restore")
+        guard let snapshot = SessionPersistenceActor.shared.restore(),
+              !snapshot.windows.isEmpty else {
+            logger.info("No session to restore (count=\(recoveryCount))")
             return false
         }
 

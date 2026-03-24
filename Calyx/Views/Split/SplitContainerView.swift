@@ -18,6 +18,18 @@ class SplitContainerView: NSView {
     var onDeferredLayoutComplete: (() -> Void)?
     private var needsDeferredLayout = false
 
+    /// Show or hide a subtle amber border indicating the terminal lacks keyboard focus.
+    var focusLostIndicator: Bool = false {
+        didSet {
+            guard oldValue != focusLostIndicator else { return }
+            if focusLostIndicator {
+                installFocusLostOverlay()
+            } else {
+                removeFocusLostOverlay()
+            }
+        }
+    }
+
     private static let minPaneSize: CGFloat = 50
 
     init(registry: SurfaceRegistry) {
@@ -90,6 +102,30 @@ class SplitContainerView: NSView {
         let callback = onDeferredLayoutComplete
         onDeferredLayoutComplete = nil
         callback?()
+    }
+
+    // MARK: - Focus Lost Indicator
+
+    private var focusLostEventMonitor: Any?
+
+    private func installFocusLostOverlay() {
+        wantsLayer = true
+        layer?.borderColor = NSColor.systemOrange.withAlphaComponent(0.7).cgColor
+        layer?.borderWidth = 2
+        focusLostEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            self?.removeFocusLostOverlay()
+            return event
+        }
+    }
+
+    private func removeFocusLostOverlay() {
+        layer?.borderWidth = 0
+        layer?.borderColor = nil
+        focusLostIndicator = false
+        if let monitor = focusLostEventMonitor {
+            NSEvent.removeMonitor(monitor)
+            focusLostEventMonitor = nil
+        }
     }
 
     // MARK: - Recursive Layout

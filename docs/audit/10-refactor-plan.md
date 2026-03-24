@@ -184,6 +184,32 @@ hosting.rootView = mainContent.environment(actions)
 ### Risk
 Low. SwiftUI environment is the standard pattern for this. No behavior change, just plumbing.
 
+## Step 7: ✅ Extract BrowserManager (done)
+
+### What
+Created `BrowserManager` in `Calyx/Features/Browser/BrowserManager.swift`:
+
+```swift
+@MainActor
+final class BrowserManager {
+    var onSaveRequested: (() -> Void)?
+    func controller(for tabID: UUID, tab: Tab) -> BrowserTabController?
+    func register(_ controller: BrowserTabController, for tab: Tab)
+    func currentURL(for tabID: UUID, fallback: URL) -> URL
+    func cleanupTab(id: UUID)
+    func removeAll()
+}
+```
+
+### What moved from CalyxWindowController
+- `browserControllers: [UUID: BrowserTabController]` dict
+- `wireBrowserCallbacks(controller:tab:)` — now private to `BrowserManager`
+- `browserController(for:)` now delegates to `browserManager.controller(for:tab:)`
+- `cleanupTabResources` / `windowWillClose` / `windowSnapshot` updated to use `browserManager`
+
+### Risk
+Low. Clean boundary: browser lifecycle doesn't interact with split/tab model directly.
+
 ## What NOT to Touch Yet
 
 | Component | Why |

@@ -18,7 +18,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private let focusManager = FocusManager()
     private let windowActions = WindowActions()
     private var isRestoring = false
-    private var browserControllers: [UUID: BrowserTabController] = [:]
+    private let browserManager = BrowserManager()
     private let gitController: GitController
     private let reviewController: ReviewController
     private var clipboardConfirmationController: ClipboardConfirmationController?
@@ -68,28 +68,12 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private var reviewFileCount: Int { reviewController.reviewFileCount }
 
     private func browserController(for tabID: UUID) -> BrowserTabController? {
-        if let existing = browserControllers[tabID] { return existing }
-        guard let tab = windowSession.groups.flatMap(\.tabs).first(where: { $0.id == tabID }),
-              case .browser(let url) = tab.content else { return nil }
-        let controller = BrowserTabController(url: url)
-        wireBrowserCallbacks(controller: controller, tab: tab)
-        browserControllers[tabID] = controller
-        return controller
+        guard let tab = windowSession.groups.flatMap(\.tabs).first(where: { $0.id == tabID }) else { return nil }
+        return browserManager.controller(for: tabID, tab: tab)
     }
 
     func browserController(forExternal tabID: UUID) -> BrowserTabController? {
         browserController(for: tabID)
-    }
-
-    private func wireBrowserCallbacks(controller: BrowserTabController, tab: Tab) {
-        controller.browserView.onTitleChanged = { [weak tab] title in
-            tab?.title = title
-        }
-        controller.browserView.onURLChanged = { [weak self, weak tab] url in
-            guard let tab else { return }
-            tab.content = .browser(url: url)
-            self?.requestSave()
-        }
     }
 
     // MARK: - Initialization
@@ -130,6 +114,15 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         setupUI()
         if !restoring { setupTerminalSurface() }
         registerNotificationObservers()
+        focusManager.onFocusFailed = { [weak self] in
+            self?.splitContainerView?.focusLostIndicator = true
+        }
+        focusManager.onFocusRestored = { [weak self] in
+            self?.splitContainerView?.focusLostIndicator = false
+        }
+        browserManager.onSaveRequested = { [weak self] in
+            self?.requestSave()
+        }
     }
 
     @available(*, unavailable)
@@ -568,8 +561,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         group.activeTabID = tab.id
 
         let controller = BrowserTabController(url: url)
-        wireBrowserCallbacks(controller: controller, tab: tab)
-        browserControllers[tab.id] = controller
+        browserManager.register(controller, for: tab)
 
         refreshHostingView()
         DispatchQueue.main.async { [weak self] in
@@ -1306,17 +1298,65 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     @objc private func handleInitialSizeNotification(_ notification: Notification) {
         guard let surfaceView = notification.object as? SurfaceView else { return }
         guard belongsToThisWindow(surfaceView) else { return }
+        guard let window else { return }
         guard let width = notification.userInfo?["width"] as? UInt32,
               let height = notification.userInfo?["height"] as? UInt32 else { return }
-        // width/height are in cells; pixel resize requires cell size from SurfaceView.
-        logger.debug("[InitialSize] requested \(width)×\(height) cells")
+
+        let cellSize = surfaceView.cachedCellSize
+        guard cellSize.width > 0, cellSize.height > 0 else {
+            logger.debug("[InitialSize] cell size not yet known, ignoring \(width)×\(height)")
+            return
+        }
+
+        // Measure chrome and compute target content size
+        let contentSize = window.contentView?.bounds.size ?? .zero
+        let surfaceSize = surfaceView.bounds.size
+        let hChrome = max(contentSize.width - surfaceSize.width, 0)
+        let vChrome = max(contentSize.height - surfaceSize.height, 0)
+
+        let target = NSSize(
+            width: CGFloat(width) * cellSize.width + hChrome,
+            height: CGFloat(height) * cellSize.height + vChrome
+        )
+        window.setContentSize(target)
+        logger.debug("[InitialSize] resized to \(width)×\(height) cells → content \(target.width)×\(target.height)px")
     }
 
     @objc private func handleSizeLimitNotification(_ notification: Notification) {
         guard let surfaceView = notification.object as? SurfaceView else { return }
         guard belongsToThisWindow(surfaceView) else { return }
-        // Size limits are in cells; pixel conversion requires cell size from SurfaceView.
-        logger.debug("[SizeLimit] received for surface \(String(describing: ObjectIdentifier(surfaceView)))")
+        guard let window else { return }
+
+        let cellSize = surfaceView.cachedCellSize
+        guard cellSize.width > 0, cellSize.height > 0 else {
+            logger.debug("[SizeLimit] cell size not yet known, ignoring")
+            return
+        }
+
+        let minW = notification.userInfo?["min_width"] as? UInt32 ?? 0
+        let minH = notification.userInfo?["min_height"] as? UInt32 ?? 0
+        let maxW = notification.userInfo?["max_width"] as? UInt32 ?? 0
+        let maxH = notification.userInfo?["max_height"] as? UInt32 ?? 0
+
+        // Measure chrome: content view area minus the surface area
+        let contentSize = window.contentView?.bounds.size ?? .zero
+        let surfaceSize = surfaceView.bounds.size
+        let hChrome = max(contentSize.width - surfaceSize.width, 0)
+        let vChrome = max(contentSize.height - surfaceSize.height, 0)
+
+        if minW > 0 || minH > 0 {
+            window.contentMinSize = NSSize(
+                width: CGFloat(minW) * cellSize.width + hChrome,
+                height: CGFloat(minH) * cellSize.height + vChrome
+            )
+        }
+        if maxW > 0 || maxH > 0 {
+            window.contentMaxSize = NSSize(
+                width: maxW > 0 ? CGFloat(maxW) * cellSize.width + hChrome : CGFloat.greatestFiniteMagnitude,
+                height: maxH > 0 ? CGFloat(maxH) * cellSize.height + vChrome : CGFloat.greatestFiniteMagnitude
+            )
+        }
+        logger.debug("[SizeLimit] applied min=\(minW)×\(minH) max=\(maxW)×\(maxH) cells (chrome \(hChrome)×\(vChrome)px)")
     }
 
     func applyCurrentGhosttyConfig() {
@@ -1435,7 +1475,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 case .terminal:
                     browserURL = nil
                 case .browser(let configuredURL):
-                    browserURL = browserControllers[tab.id]?.browserState.url ?? configuredURL
+                    browserURL = browserManager.currentURL(for: tab.id, fallback: configuredURL)
                 case .diff:
                     return nil  // Already handled above, but needed for exhaustive switch
                 }
@@ -1475,7 +1515,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     // MARK: - Helpers
 
     private func cleanupTabResources(id tabID: UUID) {
-        browserControllers.removeValue(forKey: tabID)
+        browserManager.cleanupTab(id: tabID)
         reviewController.cleanupTab(id: tabID)
     }
 
@@ -1589,7 +1629,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             }
         }
 
-        browserControllers.removeAll()
+        browserManager.removeAll()
         reviewController.cancelAll()
         gitController.cancelAll()
 

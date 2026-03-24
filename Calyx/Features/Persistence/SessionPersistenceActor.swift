@@ -10,9 +10,10 @@ private let logger = Logger(subsystem: "com.legato3.terminal", category: "Sessio
 
 actor SessionPersistenceActor {
 
-    private let savePath: URL
-    private let backupPath: URL
-    private let recoveryMarkerPath: URL
+    // Written once in init, never mutated — safe for nonisolated read.
+    nonisolated(unsafe) private let savePath: URL
+    nonisolated(unsafe) private let backupPath: URL
+    nonisolated(unsafe) private let recoveryMarkerPath: URL
     private var pendingSave: Task<Void, Never>?
 
     static let shared = SessionPersistenceActor()
@@ -35,14 +36,14 @@ actor SessionPersistenceActor {
         self.recoveryMarkerPath = calyxDir.appendingPathComponent(".recovery")
     }
 
-    func sessionSavePath() -> URL {
+    nonisolated func sessionSavePath() -> URL {
         savePath
     }
 
     /// Migrate session data from legacy Application Support path to ~/.calyx/.
     /// Returns true if migration was performed.
     @discardableResult
-    func migrateFromLegacyPath() -> Bool {
+    nonisolated func migrateFromLegacyPath() -> Bool {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let legacyPath = appSupport.appendingPathComponent("Calyx/session.json")
 
@@ -77,6 +78,28 @@ actor SessionPersistenceActor {
         await performSave(snapshot)
     }
 
+    /// Synchronous save for use during app termination when async dispatch is unavailable.
+    /// Bypasses `pendingSave` cancellation — only call from `applicationWillTerminate`.
+    nonisolated func saveImmediatelySync(_ snapshot: SessionSnapshot) {
+        do {
+            let data = try JSONEncoder().encode(snapshot)
+            let tmpPath = savePath.appendingPathExtension("tmp")
+            try data.write(to: tmpPath, options: .atomic)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: tmpPath.path
+            )
+            if FileManager.default.fileExists(atPath: savePath.path) {
+                try? FileManager.default.removeItem(at: backupPath)
+                try? FileManager.default.moveItem(at: savePath, to: backupPath)
+            }
+            try FileManager.default.moveItem(at: tmpPath, to: savePath)
+            logger.info("Session saved synchronously (shutdown path)")
+        } catch {
+            logger.error("Synchronous save failed: \(error.localizedDescription)")
+        }
+    }
+
     private func performSave(_ snapshot: SessionSnapshot) async {
         do {
             let data = try JSONEncoder().encode(snapshot)
@@ -107,8 +130,7 @@ actor SessionPersistenceActor {
 
     // MARK: - Restore
 
-    func restore() -> SessionSnapshot? {
-        // Try migrating from legacy path first
+    nonisolated func restore() -> SessionSnapshot? {
         migrateFromLegacyPath()
 
         if let snapshot = loadFromPath(savePath) {
@@ -119,7 +141,7 @@ actor SessionPersistenceActor {
         return loadFromPath(backupPath)
     }
 
-    private func loadFromPath(_ path: URL) -> SessionSnapshot? {
+    nonisolated private func loadFromPath(_ path: URL) -> SessionSnapshot? {
         guard let data = try? Data(contentsOf: path) else { return nil }
 
         do {
@@ -130,7 +152,6 @@ actor SessionPersistenceActor {
                 return nil
             }
 
-            // Apply migration pipeline
             return SessionSnapshot.migrate(snapshot)
         } catch {
             logger.error("Failed to decode session from \(path.lastPathComponent): \(error.localizedDescription)")
@@ -140,17 +161,17 @@ actor SessionPersistenceActor {
 
     // MARK: - Crash Loop Detection
 
-    func incrementRecoveryCounter() -> Int {
+    nonisolated func incrementRecoveryCounter() -> Int {
         let count = currentRecoveryCount() + 1
         try? "\(count)".write(to: recoveryMarkerPath, atomically: true, encoding: .utf8)
         return count
     }
 
-    func resetRecoveryCounter() {
+    nonisolated func resetRecoveryCounter() {
         try? FileManager.default.removeItem(at: recoveryMarkerPath)
     }
 
-    func currentRecoveryCount() -> Int {
+    nonisolated func currentRecoveryCount() -> Int {
         guard let content = try? String(contentsOf: recoveryMarkerPath, encoding: .utf8),
               let count = Int(content) else {
             return 0

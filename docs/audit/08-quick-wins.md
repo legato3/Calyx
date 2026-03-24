@@ -2,7 +2,7 @@
 
 10 high-impact, low-effort improvements. No large refactors.
 
-**Status**: #1–4, 6, 8–10 done. #5 deferred (unimplemented handlers, not dead code). #7 deferred (needs SurfaceRegistry callbacks).
+**Status**: All done. #5 (handler stubs) superseded — all 9 handlers implemented or documented; `initialSize` and `sizeLimit` now fully functional. #7 done via lazy-rebuild `surfaceToTab` dictionary.
 
 ## 1. ✅ Extract tab cleanup method
 
@@ -135,19 +135,11 @@ if isUITesting, mods == [.control, .shift],
 
 **Visible effect**: Cleaner production code; smaller binary.
 
-## 7. ⚠️ Add reverse lookup to findTab (deferred — needs SurfaceRegistry callbacks)
+## 7. ✅ Add reverse lookup to findTab (done)
 
-**What**: Add a dictionary for O(1) surface-to-tab lookup:
+**What**: Added `surfaceToTab: [UUID: (tab: Tab, group: TabGroup)]` dictionary with lazy rebuild via `surfaceToTabDirty` flag. `findTab(for:)` rebuilds only when the tree changes, then returns O(1).
 
-```swift
-// In CalyxWindowController:
-private var surfaceToTab: [ObjectIdentifier: (tab: Tab, group: TabGroup)] = [:]
-
-// Update on surface creation/destruction
-// Replace findTab(for:) body with dictionary lookup
-```
-
-**Why**: `findTab(for:)` is called on every notification handler and does O(n^2) scanning.
+**Why**: `findTab(for:)` is called on every notification handler and previously did O(n²) scanning.
 
 **Visible effect**: Faster notification handling with many tabs; eliminates cumulative UI lag.
 
