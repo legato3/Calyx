@@ -125,6 +125,11 @@ struct AnyCodable: @unchecked Sendable, Codable, Equatable {
         return nil
     }
 
+    var boolValue: Bool? {
+        if case .bool(let b) = storage { return b }
+        return nil
+    }
+
     var dictionaryValue: [String: Any]? {
         guard case .dictionary(let d) = storage else { return nil }
         return d.compactMapValues { $0.rawValue }
@@ -387,6 +392,94 @@ struct MCPRouter: Sendable {
                 name: "show_quick_terminal",
                 description: "Toggle the Calyx quick terminal panel (slide-in overlay terminal). Calling this when the panel is hidden shows it; calling it when visible hides it.",
                 inputSchema: schema(properties: [:])
+            ),
+
+            // MARK: - Terminal Control Tools
+
+            MCPTool(
+                name: "get_workspace_state",
+                description: "Get the current state of the Calyx workspace: all tab groups, tabs, and panes with their IDs, titles, working directories, and focus state. Use this to discover pane IDs before calling run_in_pane, focus_pane, or set_tab_title.",
+                inputSchema: schema(properties: [:])
+            ),
+            MCPTool(
+                name: "create_tab",
+                description: "Open a new terminal tab in the active window. Optionally set a working directory, a tab title, and a shell command to run automatically once the shell is ready.",
+                inputSchema: schema(
+                    properties: [
+                        "pwd": prop("string", "Working directory for the new tab. Defaults to the active tab's directory."),
+                        "title": prop("string", "Optional title to set on the new tab."),
+                        "command": prop("string", "Optional shell command to inject into the new tab once the shell is ready (e.g. 'claude\\n' to start Claude)."),
+                    ]
+                )
+            ),
+            MCPTool(
+                name: "create_split",
+                description: "Split the currently focused terminal pane. Use 'horizontal' to split top/bottom (new pane below) or 'vertical' to split left/right (new pane to the right).",
+                inputSchema: schema(
+                    properties: [
+                        "direction": prop("string", "Split direction: 'horizontal' (new pane below) or 'vertical' (new pane to the right). Defaults to 'vertical'."),
+                    ]
+                )
+            ),
+            MCPTool(
+                name: "run_in_pane",
+                description: "Inject text or a shell command into a specific terminal pane. Use get_workspace_state to find pane IDs. If neither tab_id nor pane_id is given, the active pane is used.",
+                inputSchema: schema(
+                    properties: [
+                        "text": prop("string", "Text to inject into the pane. Include a trailing newline (\\n) or set press_enter=true to execute as a command."),
+                        "tab_id": prop("string", "UUID of the target tab. If omitted, the active tab is used."),
+                        "pane_id": prop("string", "UUID of the specific pane (split leaf). If omitted, the focused pane in the tab is used."),
+                        "press_enter": prop("boolean", "Whether to press Return after injecting the text. Default: false."),
+                    ],
+                    required: ["text"]
+                )
+            ),
+            MCPTool(
+                name: "focus_pane",
+                description: "Move keyboard focus to a specific terminal pane by its UUID. Use get_workspace_state to find pane IDs.",
+                inputSchema: schema(
+                    properties: [
+                        "pane_id": prop("string", "UUID of the pane to focus."),
+                    ],
+                    required: ["pane_id"]
+                )
+            ),
+            MCPTool(
+                name: "set_tab_title",
+                description: "Rename a terminal tab. Use get_workspace_state to find tab IDs.",
+                inputSchema: schema(
+                    properties: [
+                        "tab_id": prop("string", "UUID of the tab to rename."),
+                        "title": prop("string", "New title for the tab."),
+                    ],
+                    required: ["tab_id", "title"]
+                )
+            ),
+            MCPTool(
+                name: "show_notification",
+                description: "Push a macOS desktop notification visible to the user. Useful to signal task completion, errors, or milestones when running in the background.",
+                inputSchema: schema(
+                    properties: [
+                        "title": prop("string", "Notification title (keep short)."),
+                        "body": prop("string", "Notification body text."),
+                    ],
+                    required: ["title", "body"]
+                )
+            ),
+            MCPTool(
+                name: "get_git_status",
+                description: "Get the git status of the active tab's working directory: modified/added/deleted files and current branch. Returns a formatted text summary.",
+                inputSchema: schema(properties: [:])
+            ),
+            MCPTool(
+                name: "get_pane_output",
+                description: "Read the currently selected text from a terminal pane. The user (or another tool like run_in_pane) must have selected text in the pane first — this returns the active selection. Returns empty string if nothing is selected.",
+                inputSchema: schema(
+                    properties: [
+                        "tab_id": prop("string", "UUID of the target tab. Defaults to the active tab."),
+                        "pane_id": prop("string", "UUID of the specific pane. Defaults to the focused pane."),
+                    ]
+                )
             ),
         ]
     }

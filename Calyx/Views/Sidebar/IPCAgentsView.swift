@@ -446,9 +446,20 @@ private struct PeerRowView: View {
     let isSelected: Bool
     var onTap: () -> Void
 
-    private var freshnessOpacity: Double {
-        let age = Date().timeIntervalSince(peer.lastSeen)
-        return max(0.35, 1 - age / 60)
+    @State private var nudgeState: NudgeState = .idle
+
+    private enum NudgeState {
+        case idle, sent, failed
+    }
+
+    private var status: AgentStatus { AgentStatus.infer(from: peer) }
+
+    private var statusColor: Color {
+        switch status {
+        case .active:       return Color.green
+        case .idle:         return Color.yellow
+        case .disconnected: return Color.gray
+        }
     }
 
     private var ageLabel: String {
@@ -460,33 +471,43 @@ private struct PeerRowView: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(Color.green.opacity(freshnessOpacity))
-                    .frame(width: 7, height: 7)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(peer.name)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .lineLimit(1)
-                    if !peer.role.isEmpty {
-                        Text(peer.role)
-                            .font(.system(size: 10, design: .rounded))
-                            .foregroundStyle(.tertiary)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 7) {
+                    // Status dot + label
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 7, height: 7)
+                    Text(status.label)
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(statusColor.opacity(0.85))
+                    Spacer()
+                    if isSelected {
+                        Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.accentColor)
+                    } else {
+                        Text(ageLabel)
+                            .font(.system(size: 9, design: .rounded))
+                            .foregroundStyle(.quaternary)
                     }
                 }
-                Spacer()
-                if isSelected {
-                    Image(systemName: "line.3.horizontal.decrease.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.accentColor)
-                } else {
-                    Text(ageLabel)
-                        .font(.system(size: 10, design: .rounded))
-                        .foregroundStyle(.quaternary)
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(peer.name)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .lineLimit(1)
+                        if !peer.role.isEmpty {
+                            Text(peer.role)
+                                .font(.system(size: 10, design: .rounded))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    Spacer()
+                    nudgeButton
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.white.opacity(0.04))
@@ -497,6 +518,41 @@ private struct PeerRowView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var nudgeButton: some View {
+        Button {
+            let sent = TerminalControlBridge.shared.delegate?
+                .runInPaneMatching(
+                    titleContains: peer.name,
+                    text: "Continue with the next step.",
+                    pressEnter: true
+                ) ?? false
+            nudgeState = sent ? .sent : .failed
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                nudgeState = .idle
+            }
+        } label: {
+            Group {
+                switch nudgeState {
+                case .idle:
+                    Label("nudge", systemImage: "arrow.forward.circle")
+                        .labelStyle(.iconOnly)
+                case .sent:
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.green)
+                case .failed:
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(Color.orange)
+                }
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help("Nudge: inject \"Continue with the next step.\" into this agent's pane")
+        .disabled(nudgeState != .idle)
     }
 }
 

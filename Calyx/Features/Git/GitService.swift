@@ -63,6 +63,32 @@ enum GitService {
         return parseStatus(output)
     }
 
+    /// Returns true if the working tree has any uncommitted changes (staged or unstaged).
+    static func isRepoDirty(workDir: String) async -> Bool {
+        let output = (try? await run(args: ["status", "--porcelain"], workDir: workDir)) ?? ""
+        return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Stages all changes in the working tree (`git add -A`).
+    static func stageAll(workDir: String) async throws {
+        _ = try await run(args: ["add", "-A"], workDir: workDir)
+    }
+
+    /// Creates a commit with the given message. Returns the new commit hash.
+    static func commit(message: String, workDir: String) async throws -> String {
+        let output = try await run(args: ["commit", "-m", message], workDir: workDir)
+        // Parse the short hash from the first line, e.g. "[main abcd123] message"
+        if let match = output.firstMatch(of: /\[[\w/]+ ([0-9a-f]+)\]/) {
+            return String(match.output.1)
+        }
+        return output.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Resets the working tree to the given commit hash (`git reset --hard`).
+    static func resetHard(to hash: String, workDir: String) async throws {
+        _ = try await run(args: ["reset", "--hard", hash], workDir: workDir)
+    }
+
     static func commitLog(workDir: String, maxCount: Int, skip: Int) async throws -> [GitCommit] {
         let format = "%x1f%H%x1f%h%x1f%s%x1f%an%x1f%ar%x1f%P%x1e"
         let output = try await run(

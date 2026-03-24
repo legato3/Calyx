@@ -33,5 +33,11 @@ class CommandRegistry {
         frequencyMap[commandID, default: 0] += 1
     }
 
+    /// Removes all commands whose id starts with `prefix`. Used for dynamic command groups
+    /// (e.g., prompts, workspaces) that are re-registered after state changes.
+    func unregisterAll(withPrefix prefix: String) {
+        commands.removeAll { $0.id.hasPrefix(prefix) }
+    }
+
     var allCommands: [Command] { commands }
 }

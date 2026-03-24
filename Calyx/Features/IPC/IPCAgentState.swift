@@ -6,6 +6,43 @@
 
 import Foundation
 
+// MARK: - AgentStatus
+
+/// Inferred liveness of a registered peer based on heartbeat recency.
+enum AgentStatus: Sendable {
+    /// Heartbeat within the last 30 seconds — agent is actively running.
+    case active
+    /// Heartbeat 30 seconds–5 minutes ago — agent has gone quiet.
+    case idle
+    /// Heartbeat more than 5 minutes ago — near TTL expiry, likely disconnected.
+    case disconnected
+
+    static func infer(from peer: Peer) -> AgentStatus {
+        let age = Date().timeIntervalSince(peer.lastSeen)
+        switch age {
+        case ..<30:   return .active
+        case ..<300:  return .idle
+        default:      return .disconnected
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .active:       return "active"
+        case .idle:         return "idle"
+        case .disconnected: return "away"
+        }
+    }
+
+    var color: String {
+        switch self {
+        case .active:       return "green"
+        case .idle:         return "yellow"
+        case .disconnected: return "gray"
+        }
+    }
+}
+
 @MainActor @Observable
 final class IPCAgentState {
     static let shared = IPCAgentState()

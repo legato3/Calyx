@@ -61,6 +61,7 @@ struct MainContentView: View {
                         onRefreshGitStatus: actions.onRefreshGitStatus,
                         onLoadMoreCommits: actions.onLoadMoreCommits,
                         onExpandCommit: actions.onExpandCommit,
+                        onRollbackToCheckpoint: actions.onRollbackToCheckpoint,
                         onMoveTab: actions.onMoveTab
                     )
                     .frame(width: windowSession.sidebarWidth)

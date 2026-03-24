@@ -26,6 +26,7 @@ final class WindowActions {
     var onRefreshGitStatus: (() -> Void)?
     var onLoadMoreCommits: (() -> Void)?
     var onExpandCommit: ((String) -> Void)?
+    var onRollbackToCheckpoint: ((GitCommit) -> Void)?
     var onSidebarWidthChanged: ((CGFloat) -> Void)?
     var onCollapseToggled: (() -> Void)?
     var onCloseAllTabsInGroup: ((UUID) -> Void)?

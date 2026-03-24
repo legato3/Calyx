@@ -163,6 +163,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         browserManager.onSaveRequested = { [weak self] in
             self?.requestSave()
         }
+        TerminalControlBridge.shared.delegate = self
     }
 
     @available(*, unavailable)
@@ -275,6 +276,29 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         })
         commandRegistry.register(Command(id: "git.refresh", title: "Refresh Git Changes", category: "Git") { [weak self] in
             self?.gitController.refreshGitStatus()
+        })
+        commandRegistry.register(Command(id: "checkpoint.now", title: "Checkpoint Now", category: "Git") { [weak self] in
+            guard let self else { return }
+            Task {
+                let pwd = await self.activeTabPwd
+                await CheckpointManager.shared.checkpoint(workDir: pwd ?? FileManager.default.currentDirectoryPath)
+            }
+        })
+        commandRegistry.register(Command(
+            id: "checkpoint.toggle",
+            title: "Enable Auto-Checkpoint",
+            category: "Git",
+            isAvailable: { !CheckpointManager.shared.isEnabled }
+        ) {
+            CheckpointManager.shared.isEnabled = true
+        })
+        commandRegistry.register(Command(
+            id: "checkpoint.toggleOff",
+            title: "Disable Auto-Checkpoint",
+            category: "Git",
+            isAvailable: { CheckpointManager.shared.isEnabled }
+        ) {
+            CheckpointManager.shared.isEnabled = false
         })
         commandRegistry.register(Command(id: "ipc.enable", title: "Enable AI Agent IPC", category: "IPC", isAvailable: { [weak self] in
             !(self?.mcpServer.isRunning ?? false)
@@ -418,6 +442,87 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 handler: { [weak self] in try? WorkspaceManager.delete(name: name) }
             ))
         }
+
+        refreshPromptCommands()
+    }
+
+    // MARK: - Prompt Library
+
+    private func refreshPromptCommands() {
+        // Remove any previously-registered prompt commands before re-registering.
+        commandRegistry.unregisterAll(withPrefix: "prompt.")
+
+        commandRegistry.register(Command(
+            id: "prompt.save_as",
+            title: "Save Prompt As…",
+            category: "Prompts",
+            handler: { [weak self] in self?.promptSavePrompt() }
+        ))
+
+        for entry in PromptLibraryManager.all() {
+            let id = entry.id
+            let content = entry.content
+            commandRegistry.register(Command(
+                id: "prompt.inject.\(id)",
+                title: "Prompt: \(entry.title)",
+                category: "Prompts",
+                isAvailable: { [weak self] in self?.focusedController != nil },
+                handler: { [weak self] in
+                    self?.focusedController?.sendText(content)
+                }
+            ))
+            commandRegistry.register(Command(
+                id: "prompt.delete.\(id)",
+                title: "Delete Prompt: \(entry.title)",
+                category: "Prompts",
+                handler: { [weak self] in
+                    PromptLibraryManager.delete(id: id)
+                    self?.refreshPromptCommands()
+                }
+            ))
+        }
+    }
+
+    private func promptSavePrompt() {
+        // Build a stacked accessory view: name field on top, content text view below.
+        let nameField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 22))
+        nameField.placeholderString = "Prompt name…"
+
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .bezelBorder
+
+        let contentView = NSTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+        contentView.isEditable = true
+        contentView.isRichText = false
+        contentView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        contentView.string = NSPasteboard.general.string(forType: .string) ?? ""
+        scrollView.documentView = contentView
+
+        let stack = NSStackView(views: [nameField, scrollView])
+        stack.orientation = .vertical
+        stack.spacing = 8
+        stack.frame = NSRect(x: 0, y: 0, width: 300, height: 130)
+
+        let alert = NSAlert()
+        alert.messageText = "Save Prompt"
+        alert.informativeText = "Enter a name and the prompt content to save:"
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.accessoryView = stack
+        alert.window.initialFirstResponder = nameField
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let name = nameField.stringValue.trimmingCharacters(in: .whitespaces)
+        let content = contentView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !content.isEmpty else { return }
+
+        let entry = PromptEntry(id: UUID(), title: name, content: content, createdAt: Date())
+        PromptLibraryManager.save(entry)
+        refreshPromptCommands()
     }
 
     private func promptSaveWorkspace() {
@@ -526,6 +631,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         windowActions.onRefreshGitStatus = { [weak self] in self?.gitController.refreshGitStatus() }
         windowActions.onLoadMoreCommits = { [weak self] in self?.gitController.loadMoreCommits() }
         windowActions.onExpandCommit = { [weak self] hash in self?.gitController.expandCommit(hash: hash) }
+        windowActions.onRollbackToCheckpoint = { [weak self] commit in self?.confirmAndRollbackToCheckpoint(commit) }
         windowActions.onSidebarWidthChanged = { [weak self] width in self?.windowSession.sidebarWidth = SidebarLayout.clampWidth(width) }
         windowActions.onCollapseToggled = { [weak self] in self?.requestSave() }
         windowActions.onCloseAllTabsInGroup = { [weak self] groupID in self?.closeAllTabsInGroup(id: groupID) }
@@ -1419,4 +1525,245 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         ipcController.handleLaunchWorkflow(event: event)
     }
 
+}
+
+// MARK: - TerminalControl (MCP bridge)
+
+extension CalyxWindowController: TerminalControl {
+
+    var terminalWindowSession: WindowSession { windowSession }
+
+    var activeTabPwd: String? { activeTab?.pwd }
+
+    // MARK: create_tab
+
+    func createTab(pwd: String?, title: String?, command: String?) {
+        tabController.createNewTab(pwd: pwd ?? activeTab?.pwd)
+        if let title, let newTab = windowSession.activeGroup?.activeTab {
+            newTab.title = title
+        }
+        guard let command, !command.isEmpty else { return }
+        // Inject command after a brief delay for the shell to be ready.
+        let delay = DispatchTime.now() + 0.8
+        DispatchQueue.main.asyncAfter(deadline: delay) { [weak self] in
+            guard let self else { return }
+            guard let tab = self.windowSession.activeGroup?.activeTab,
+                  let focusedID = tab.splitTree.focusedLeafID,
+                  let controller = tab.registry.controller(for: focusedID) else { return }
+            controller.sendText(command)
+            if !command.hasSuffix("\n") {
+                self.sendEnterKey(to: controller)
+            }
+        }
+    }
+
+    // MARK: create_split
+
+    func createSplit(direction: String) {
+        guard let tab = activeTab,
+              let focusedID = tab.splitTree.focusedLeafID,
+              let surfaceView = tab.registry.view(for: focusedID) else { return }
+
+        let splitDirection: ghostty_action_split_direction_e
+        switch direction.lowercased() {
+        case "horizontal":
+            splitDirection = GHOSTTY_SPLIT_DIRECTION_DOWN
+        default:
+            splitDirection = GHOSTTY_SPLIT_DIRECTION_RIGHT
+        }
+
+        NotificationCenter.default.post(
+            name: .ghosttyNewSplit,
+            object: surfaceView,
+            userInfo: ["direction": splitDirection]
+        )
+    }
+
+    // MARK: run_in_pane
+
+    @discardableResult
+    func runInPane(tabID: UUID?, paneID: UUID?, text: String, pressEnter: Bool) -> Bool {
+        let targetTab: Tab?
+        if let tabID {
+            targetTab = windowSession.groups.flatMap(\.tabs).first { $0.id == tabID }
+        } else {
+            targetTab = activeTab
+        }
+        guard let tab = targetTab else { return false }
+
+        let leafID: UUID?
+        if let paneID {
+            leafID = tab.splitTree.allLeafIDs().contains(paneID) ? paneID : nil
+        } else {
+            leafID = tab.splitTree.focusedLeafID
+        }
+        guard let resolvedID = leafID,
+              let controller = tab.registry.controller(for: resolvedID) else { return false }
+
+        controller.sendText(text)
+        if pressEnter {
+            sendEnterKey(to: controller)
+        }
+        return true
+    }
+
+    // MARK: focus_pane
+
+    @discardableResult
+    func focusPane(paneID: UUID) -> Bool {
+        for group in windowSession.groups {
+            for tab in group.tabs {
+                guard tab.splitTree.allLeafIDs().contains(paneID) else { continue }
+                tab.splitTree.focusedLeafID = paneID
+                if let view = tab.registry.view(for: paneID) {
+                    window?.makeFirstResponder(view)
+                }
+                // Also switch to this tab if it isn't active
+                if group.activeTabID != tab.id {
+                    tabController.switchToTab(id: tab.id)
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    // MARK: set_tab_title
+
+    @discardableResult
+    func setTabTitle(tabID: UUID, title: String) -> Bool {
+        for group in windowSession.groups {
+            if let tab = group.tabs.first(where: { $0.id == tabID }) {
+                tab.title = title
+                return true
+            }
+        }
+        return false
+    }
+
+    // MARK: show_notification
+
+    func showNotification(title: String, body: String) {
+        let tabID = activeTab?.id ?? UUID()
+        NotificationManager.shared.sendNotification(title: title, body: body, tabID: tabID)
+    }
+
+    // MARK: get_git_status
+
+    func getGitStatus() async -> String {
+        guard let pwd = activeTab?.pwd else {
+            return "No active terminal tab with a working directory."
+        }
+        do {
+            let repoRoot = try await GitService.repoRoot(workDir: pwd)
+            let entries = try await GitService.gitStatus(workDir: repoRoot)
+            if entries.isEmpty {
+                return "No changes (clean working tree at \(repoRoot))"
+            }
+            let staged = entries.filter { $0.isStaged }.map { "S \($0.status.rawValue) \($0.path)" }
+            let unstaged = entries.filter { !$0.isStaged }.map { "  \($0.status.rawValue) \($0.path)" }
+            let lines = staged + unstaged
+            return "Repo: \(repoRoot)\n" + lines.joined(separator: "\n")
+        } catch {
+            return "Not a git repository or git error: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Checkpoint rollback
+
+    private func confirmAndRollbackToCheckpoint(_ commit: GitCommit) {
+        guard let pwd = activeTab?.pwd else { return }
+        let alert = NSAlert()
+        alert.messageText = "Roll back to checkpoint?"
+        alert.informativeText = "This will run git reset --hard \(commit.shortHash) and discard all changes made since:\n\n"\(commit.message)"\n\nThis cannot be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Roll Back")
+        alert.addButton(withTitle: "Cancel")
+        guard let window else { return }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await CheckpointManager.shared.rollback(to: commit.id, workDir: pwd)
+                    self.gitController.refreshGitStatus()
+                } catch {
+                    let errAlert = NSAlert(error: error)
+                    if let w = self.window { errAlert.beginSheetModal(for: w) }
+                }
+            }
+        }
+    }
+
+    // MARK: get_workspace_state
+
+    func getWorkspaceState() -> WorkspaceStateResult {
+        let activeTabID = windowSession.activeGroup?.activeTabID?.uuidString
+        let groups: [GroupInfo] = windowSession.groups.map { group in
+            let tabs: [TabInfo] = group.tabs.map { tab in
+                let panes: [PaneInfo] = tab.splitTree.allLeafIDs().map { paneID in
+                    PaneInfo(id: paneID.uuidString, isFocused: tab.splitTree.focusedLeafID == paneID)
+                }
+                return TabInfo(
+                    id: tab.id.uuidString,
+                    title: tab.title,
+                    pwd: tab.pwd,
+                    isActive: group.activeTabID == tab.id,
+                    panes: panes
+                )
+            }
+            return GroupInfo(id: group.id.uuidString, name: group.name, tabs: tabs)
+        }
+        return WorkspaceStateResult(activeTabID: activeTabID, groups: groups)
+    }
+
+    // MARK: run_in_pane_matching
+
+    @discardableResult
+    func runInPaneMatching(titleContains: String, text: String, pressEnter: Bool) -> Bool {
+        let needle = titleContains.lowercased()
+        for group in windowSession.groups {
+            for tab in group.tabs {
+                guard tab.title.lowercased().contains(needle) else { continue }
+                guard let focusedID = tab.splitTree.focusedLeafID ?? tab.splitTree.allLeafIDs().first,
+                      let controller = tab.registry.controller(for: focusedID) else { continue }
+                controller.sendText(text)
+                if pressEnter { sendEnterKey(to: controller) }
+                return true
+            }
+        }
+        return false
+    }
+
+    // MARK: get_pane_output
+
+    func getPaneOutput(tabID: UUID?, paneID: UUID?) -> String? {
+        let targetTab: Tab?
+        if let tabID {
+            targetTab = windowSession.groups.flatMap(\.tabs).first { $0.id == tabID }
+        } else {
+            targetTab = activeTab
+        }
+        guard let tab = targetTab else { return nil }
+
+        let leafID: UUID?
+        if let paneID {
+            leafID = tab.splitTree.allLeafIDs().contains(paneID) ? paneID : nil
+        } else {
+            leafID = tab.splitTree.focusedLeafID
+        }
+        guard let resolvedID = leafID,
+              let controller = tab.registry.controller(for: resolvedID),
+              let surface = controller.surface else { return nil }
+
+        var text = ghostty_text_s()
+        guard GhosttyFFI.surfaceReadSelection(surface, text: &text) else { return nil }
+        defer {
+            var mutableText = text
+            GhosttyFFI.surfaceFreeText(surface, text: &mutableText)
+        }
+        let len = Int(text.text_len)
+        guard len > 0 else { return "" }
+        return String(cString: text.text)
+    }
 }

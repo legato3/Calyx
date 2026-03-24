@@ -266,6 +266,33 @@ final class CalyxMCPServer {
         case "show_quick_terminal":
             return handleShowQuickTerminal(id: id)
 
+        case "get_workspace_state":
+            return handleGetWorkspaceState(id: id)
+
+        case "create_tab":
+            return handleCreateTab(id: id, arguments: arguments)
+
+        case "create_split":
+            return handleCreateSplit(id: id, arguments: arguments)
+
+        case "run_in_pane":
+            return handleRunInPane(id: id, arguments: arguments)
+
+        case "focus_pane":
+            return handleFocusPane(id: id, arguments: arguments)
+
+        case "set_tab_title":
+            return handleSetTabTitle(id: id, arguments: arguments)
+
+        case "show_notification":
+            return handleShowNotification(id: id, arguments: arguments)
+
+        case "get_git_status":
+            return await handleGetGitStatus(id: id)
+
+        case "get_pane_output":
+            return handleGetPaneOutput(id: id, arguments: arguments)
+
         default:
             return toolError(id: id, text: "Unknown tool: \(toolName)")
         }
@@ -281,6 +308,11 @@ final class CalyxMCPServer {
         let role = (arguments?["role"] as? String) ?? ""
         let peer = await store.registerPeer(name: name, role: role)
         let json = "{\"peerId\":\"\(peer.id.uuidString)\"}"
+
+        // Auto-checkpoint the active tab's repo before Claude starts editing.
+        let pwd = await TerminalControlBridge.shared.delegate?.activeTabPwd
+        await CheckpointManager.shared.maybeAutoCheckpoint(workDir: pwd)
+
         return toolSuccess(id: id, text: json)
     }
 
@@ -440,6 +472,151 @@ final class CalyxMCPServer {
     private func handleShowQuickTerminal(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
         QuickTerminalController.shared.toggle()
         return toolSuccess(id: id, text: "{\"toggled\":true}")
+    }
+
+    // MARK: - Terminal Control Tool Handlers
+
+    private func handleGetWorkspaceState(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
+        guard let delegate = TerminalControlBridge.shared.delegate else {
+            return toolError(id: id, text: "No active window")
+        }
+        let state = delegate.getWorkspaceState()
+        guard let json = try? JSONEncoder().encode(state),
+              let text = String(data: json, encoding: .utf8) else {
+            return toolError(id: id, text: "Failed to encode workspace state")
+        }
+        return toolSuccess(id: id, text: text)
+    }
+
+    private func handleCreateTab(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) -> (statusCode: Int, body: Data?) {
+        guard let delegate = TerminalControlBridge.shared.delegate else {
+            return toolError(id: id, text: "No active window")
+        }
+        let pwd = arguments?["pwd"]?.stringValue
+        let title = arguments?["title"]?.stringValue
+        let command = arguments?["command"]?.stringValue
+        delegate.createTab(pwd: pwd, title: title, command: command)
+        return toolSuccess(id: id, text: "{\"created\":true}")
+    }
+
+    private func handleCreateSplit(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) -> (statusCode: Int, body: Data?) {
+        guard let delegate = TerminalControlBridge.shared.delegate else {
+            return toolError(id: id, text: "No active window")
+        }
+        let direction = arguments?["direction"]?.stringValue ?? "vertical"
+        delegate.createSplit(direction: direction)
+        return toolSuccess(id: id, text: "{\"created\":true}")
+    }
+
+    private func handleRunInPane(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) -> (statusCode: Int, body: Data?) {
+        guard let delegate = TerminalControlBridge.shared.delegate else {
+            return toolError(id: id, text: "No active window")
+        }
+        guard let text = arguments?["text"]?.stringValue else {
+            return toolError(id: id, text: "Missing required argument: text")
+        }
+        let tabID = arguments?["tab_id"]?.stringValue.flatMap(UUID.init(uuidString:))
+        let paneID = arguments?["pane_id"]?.stringValue.flatMap(UUID.init(uuidString:))
+        let pressEnter = arguments?["press_enter"]?.boolValue ?? false
+        let sent = delegate.runInPane(tabID: tabID, paneID: paneID, text: text, pressEnter: pressEnter)
+        if sent {
+            return toolSuccess(id: id, text: "{\"sent\":true}")
+        } else {
+            return toolError(id: id, text: "Pane not found. Use get_workspace_state to list pane IDs.")
+        }
+    }
+
+    private func handleFocusPane(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) -> (statusCode: Int, body: Data?) {
+        guard let delegate = TerminalControlBridge.shared.delegate else {
+            return toolError(id: id, text: "No active window")
+        }
+        guard let paneIDStr = arguments?["pane_id"]?.stringValue,
+              let paneID = UUID(uuidString: paneIDStr) else {
+            return toolError(id: id, text: "Missing or invalid pane_id")
+        }
+        let found = delegate.focusPane(paneID: paneID)
+        if found {
+            return toolSuccess(id: id, text: "{\"focused\":true}")
+        } else {
+            return toolError(id: id, text: "Pane not found: \(paneIDStr)")
+        }
+    }
+
+    private func handleSetTabTitle(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) -> (statusCode: Int, body: Data?) {
+        guard let delegate = TerminalControlBridge.shared.delegate else {
+            return toolError(id: id, text: "No active window")
+        }
+        guard let tabIDStr = arguments?["tab_id"]?.stringValue,
+              let tabID = UUID(uuidString: tabIDStr),
+              let title = arguments?["title"]?.stringValue else {
+            return toolError(id: id, text: "Missing or invalid tab_id or title")
+        }
+        let found = delegate.setTabTitle(tabID: tabID, title: title)
+        if found {
+            return toolSuccess(id: id, text: "{\"updated\":true}")
+        } else {
+            return toolError(id: id, text: "Tab not found: \(tabIDStr)")
+        }
+    }
+
+    private func handleShowNotification(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) -> (statusCode: Int, body: Data?) {
+        guard let title = arguments?["title"]?.stringValue,
+              let body = arguments?["body"]?.stringValue else {
+            return toolError(id: id, text: "Missing required arguments: title and body")
+        }
+        let delegate = TerminalControlBridge.shared.delegate
+        if let delegate {
+            delegate.showNotification(title: title, body: body)
+        } else {
+            // Fallback: send directly even without a window delegate
+            NotificationManager.shared.sendNotification(title: title, body: body, tabID: UUID())
+        }
+        return toolSuccess(id: id, text: "{\"sent\":true}")
+    }
+
+    private func handleGetGitStatus(id: JSONRPCId) async -> (statusCode: Int, body: Data?) {
+        guard let delegate = TerminalControlBridge.shared.delegate else {
+            return toolError(id: id, text: "No active window")
+        }
+        let status = await delegate.getGitStatus()
+        let escaped = status.replacingOccurrences(of: "\\", with: "\\\\")
+                            .replacingOccurrences(of: "\"", with: "\\\"")
+                            .replacingOccurrences(of: "\n", with: "\\n")
+        return toolSuccess(id: id, text: "{\"status\":\"\(escaped)\"}")
+    }
+
+    private func handleGetPaneOutput(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) -> (statusCode: Int, body: Data?) {
+        guard let delegate = TerminalControlBridge.shared.delegate else {
+            return toolError(id: id, text: "No active window")
+        }
+        let tabID = arguments?["tab_id"]?.stringValue.flatMap(UUID.init(uuidString:))
+        let paneID = arguments?["pane_id"]?.stringValue.flatMap(UUID.init(uuidString:))
+        let output = delegate.getPaneOutput(tabID: tabID, paneID: paneID) ?? ""
+        let escaped = output.replacingOccurrences(of: "\\", with: "\\\\")
+                            .replacingOccurrences(of: "\"", with: "\\\"")
+                            .replacingOccurrences(of: "\n", with: "\\n")
+        return toolSuccess(id: id, text: "{\"output\":\"\(escaped)\"}")
     }
 
     // MARK: - Response Helpers

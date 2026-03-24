@@ -17,6 +17,7 @@ struct GitChangesView: View {
     var onRefresh: (() -> Void)?
     var onLoadMore: (() -> Void)?
     var onExpandCommit: ((String) -> Void)?
+    var onRollbackToCheckpoint: ((GitCommit) -> Void)?
 
     @State private var isStagedExpanded = true
     @State private var isUnstagedExpanded = true
@@ -176,6 +177,15 @@ struct GitChangesView: View {
                 .padding(.vertical, 6)
                 .accessibilityIdentifier(AccessibilityID.Git.commitsSection)
 
+                // Show roll-back row if a recent checkpoint commit exists.
+                if let checkpoint = gitCommits.prefix(10).first(where: {
+                    $0.message.hasPrefix("wip: checkpoint")
+                }) {
+                    CheckpointRollbackRow(commit: checkpoint) {
+                        onRollbackToCheckpoint?(checkpoint)
+                    }
+                }
+
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(gitCommits) { commit in
                         CommitRowView(
@@ -248,6 +258,37 @@ private struct GitFileRow: View {
         case .unmerged: .purple
         case .typeChanged: .yellow
         }
+    }
+}
+
+// MARK: - Checkpoint Rollback Row
+
+private struct CheckpointRollbackRow: View {
+    let commit: GitCommit
+    let onRollback: () -> Void
+
+    var body: some View {
+        Button(action: onRollback) {
+            HStack(spacing: 6) {
+                Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Roll back to checkpoint")
+                        .font(.system(size: 12, weight: .medium))
+                    Text(commit.relativeDate)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+        .background(Color.orange.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
     }
 }
 

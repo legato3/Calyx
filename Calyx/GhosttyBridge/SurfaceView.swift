@@ -71,6 +71,9 @@ class SurfaceView: NSView {
     /// Whether a refresh is needed after the first real (non-zero) size is set.
     private var needsInitialRefresh = true
 
+    /// Selected text captured at right-click time, used by context bridge menu actions.
+    private var contextBridgeText: String?
+
     // MARK: - NSView Overrides
 
     override var acceptsFirstResponder: Bool { true }
@@ -577,6 +580,20 @@ class SurfaceView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        // When text is selected, show the context bridge menu instead of passing
+        // the right-click to ghostty or the default AppKit handler.
+        if let controller = surfaceController,
+           let surface = controller.surface,
+           GhosttyFFI.surfaceHasSelection(surface) {
+            let reader = GhosttySurfaceSelectionReader(surface: surface)
+            if let result = reader.readSelection(), !result.text.isEmpty {
+                contextBridgeText = result.text
+                let menu = buildContextBridgeMenu()
+                NSMenu.popUpContextMenu(menu, with: event, for: self)
+                return
+            }
+        }
+
         let mods = EventTranslator.translateModifiers(event.modifierFlags)
         if surfaceController?.sendMouseButton(
             state: GHOSTTY_MOUSE_PRESS,
@@ -586,6 +603,71 @@ class SurfaceView: NSView {
             return
         }
         super.rightMouseDown(with: event)
+    }
+
+    private func buildContextBridgeMenu() -> NSMenu {
+        let menu = NSMenu()
+
+        let copyItem = NSMenuItem(title: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
+        copyItem.target = self
+        menu.addItem(copyItem)
+
+        menu.addItem(.separator())
+
+        let sendItem = NSMenuItem(
+            title: "Send to Claude",
+            action: #selector(sendSelectionToClaude),
+            keyEquivalent: ""
+        )
+        sendItem.target = self
+        sendItem.image = NSImage(systemSymbolName: "arrow.up.circle", accessibilityDescription: nil)
+        menu.addItem(sendItem)
+
+        let explainItem = NSMenuItem(
+            title: "Ask Claude to explain",
+            action: #selector(explainSelectionWithClaude),
+            keyEquivalent: ""
+        )
+        explainItem.target = self
+        explainItem.image = NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: nil)
+        menu.addItem(explainItem)
+
+        menu.addItem(.separator())
+
+        let pasteItem = NSMenuItem(title: "Paste", action: #selector(paste(_:)), keyEquivalent: "")
+        pasteItem.target = self
+        menu.addItem(pasteItem)
+
+        return menu
+    }
+
+    @objc private func sendSelectionToClaude() {
+        guard let text = contextBridgeText, !text.isEmpty else { return }
+        contextBridgeText = nil
+        let sent = TerminalControlBridge.shared.delegate?
+            .runInPaneMatching(titleContains: "claude", text: text, pressEnter: true) ?? false
+        if !sent {
+            NotificationManager.shared.sendNotification(
+                title: "No Claude pane found",
+                body: "Start 'claude' in a split pane first, then try again.",
+                tabID: UUID()
+            )
+        }
+    }
+
+    @objc private func explainSelectionWithClaude() {
+        guard let text = contextBridgeText, !text.isEmpty else { return }
+        contextBridgeText = nil
+        let prompt = "Explain this terminal output:\n```\n\(text)\n```"
+        let sent = TerminalControlBridge.shared.delegate?
+            .runInPaneMatching(titleContains: "claude", text: prompt, pressEnter: true) ?? false
+        if !sent {
+            NotificationManager.shared.sendNotification(
+                title: "No Claude pane found",
+                body: "Start 'claude' in a split pane first, then try again.",
+                tabID: UUID()
+            )
+        }
     }
 
     override func rightMouseUp(with event: NSEvent) {

@@ -27,6 +27,7 @@ struct SidebarContentView: View {
     var onRefreshGitStatus: (() -> Void)?
     var onLoadMoreCommits: (() -> Void)?
     var onExpandCommit: ((String) -> Void)?
+    var onRollbackToCheckpoint: ((GitCommit) -> Void)?
     var onMoveTab: ((UUID, Int, Int) -> Void)?
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -129,7 +130,8 @@ struct SidebarContentView: View {
                     onCommitFileSelected: onCommitFileSelected,
                     onRefresh: onRefreshGitStatus,
                     onLoadMore: onLoadMoreCommits,
-                    onExpandCommit: onExpandCommit
+                    onExpandCommit: onExpandCommit,
+                    onRollbackToCheckpoint: onRollbackToCheckpoint
                 )
                 .padding(.top, 10)
             } else if sidebarMode == .agents {
