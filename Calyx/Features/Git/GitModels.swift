@@ -9,6 +9,7 @@ enum SidebarMode: Sendable {
     case tabs
     case changes
     case agents
+    case mesh
     case usage
     case context
     case fileChanges

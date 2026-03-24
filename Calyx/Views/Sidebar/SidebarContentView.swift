@@ -50,6 +50,8 @@ struct SidebarContentView: View {
                     .help("Changes").tag(SidebarMode.changes)
                 Image(systemName: "person.2.fill")
                     .help("Agents").tag(SidebarMode.agents)
+                Image(systemName: "network")
+                    .help("Mesh").tag(SidebarMode.mesh)
                 Image(systemName: "chart.bar.fill")
                     .help("Usage").tag(SidebarMode.usage)
                 Image(systemName: "doc.text.fill")
@@ -140,6 +142,9 @@ struct SidebarContentView: View {
                 .padding(.top, 10)
             } else if sidebarMode == .agents {
                 IPCAgentsView()
+                    .padding(.top, 4)
+            } else if sidebarMode == .mesh {
+                IPCMeshView()
                     .padding(.top, 4)
             } else if sidebarMode == .usage {
                 ClaudeUsageView()
