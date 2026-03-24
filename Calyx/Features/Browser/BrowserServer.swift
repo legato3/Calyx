@@ -21,6 +21,7 @@ final class BrowserServer {
 
     func start(preferredPort: Int = 41840) {
         if isRunning { return }
+        cleanupStaleStateFile()
         token = SecurityUtils.generateHexToken()
 
         for offset in 0..<10 {
@@ -78,6 +79,18 @@ final class BrowserServer {
         let stateFile = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/calyx/browser.json")
         try? FileManager.default.removeItem(at: stateFile)
+    }
+
+    private func cleanupStaleStateFile() {
+        let stateFile = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/calyx/browser.json")
+        guard let data = try? Data(contentsOf: stateFile),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let pid = json["pid"] as? Int32 else { return }
+        // kill(pid, 0) returns 0 if the process exists, -1 (errno ESRCH) if not
+        if kill(pid, 0) != 0 {
+            try? FileManager.default.removeItem(at: stateFile)
+        }
     }
 
     // MARK: - Connection Handling

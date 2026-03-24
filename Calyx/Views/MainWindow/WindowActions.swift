@@ -37,4 +37,7 @@ final class WindowActions {
     var onDiscardAllReviews: (() -> Void)?
     var onComposeOverlaySend: ((String) -> Bool)?
     var onDismissComposeOverlay: (() -> Void)?
+    var onToggleComposeBroadcast: (() -> Void)?
+    /// Reflects `ComposeOverlayController.broadcastEnabled` for the SwiftUI overlay.
+    var composeBroadcastEnabled: Bool = false
 }

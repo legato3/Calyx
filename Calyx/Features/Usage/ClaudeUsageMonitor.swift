@@ -66,6 +66,16 @@ final class ClaudeUsageMonitor {
 
     static let shared = ClaudeUsageMonitor()
 
+    #if DEBUG
+    /// Test-only: inject a custom home directory to avoid reading from the real ~/.claude.
+    /// Set before calling `start()` or `reload()`.
+    static var _testHomeOverride: String? = nil
+
+    /// Returns the effective monitor instance, respecting any test override.
+    /// Production callers should use `ClaudeUsageMonitor.shared` directly.
+    static var effective: ClaudeUsageMonitor { shared }
+    #endif
+
     /// Last 30 days of activity, newest first.
     private(set) var recentDays: [DayActivity] = []
     /// Per-model breakdown for the same window.
@@ -186,8 +196,14 @@ final class ClaudeUsageMonitor {
 
     // MARK: - Parsing (nonisolated — runs off the main actor in a detached task)
 
-    nonisolated private static let claudeDir = NSHomeDirectory() + "/.claude"
-    nonisolated private static let projectsDir = claudeDir + "/projects"
+    nonisolated private static var claudeDir: String {
+        #if DEBUG
+        return (ClaudeUsageMonitor._testHomeOverride ?? NSHomeDirectory()) + "/.claude"
+        #else
+        return NSHomeDirectory() + "/.claude"
+        #endif
+    }
+    nonisolated private static var projectsDir: String { claudeDir + "/projects" }
     nonisolated private static let statsCachePath = claudeDir + "/stats-cache.json"
 
     private struct ComputeResult: Sendable {

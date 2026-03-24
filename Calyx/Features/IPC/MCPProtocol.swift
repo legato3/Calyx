@@ -383,6 +383,11 @@ struct MCPRouter: Sendable {
                     required: ["peer_id"]
                 )
             ),
+            MCPTool(
+                name: "show_quick_terminal",
+                description: "Toggle the Calyx quick terminal panel (slide-in overlay terminal). Calling this when the panel is hidden shows it; calling it when visible hides it.",
+                inputSchema: schema(properties: [:])
+            ),
         ]
     }
 

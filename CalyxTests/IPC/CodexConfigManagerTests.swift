@@ -460,10 +460,8 @@ final class CodexConfigManagerTests: XCTestCase {
     // MARK: - TOML Edge Cases
 
     func test_enableIPC_multilineStringWithBracketLine() throws {
-        // Given: a multi-line TOML string value that contains a line starting with '['
-        // The parser treats lines by content — a bracket line inside a multi-line
-        // string would be incorrectly treated as a section boundary.
-        // This test documents the current known limitation.
+        // Given: a multi-line TOML string value that contains a line starting with '['.
+        // The parser must not treat that bracket line as a table header boundary.
         let existing = """
         [general]
         description = \"\"\"
@@ -477,10 +475,12 @@ final class CodexConfigManagerTests: XCTestCase {
         // When
         try CodexConfigManager.enableIPC(port: 41830, token: "tok", configPath: configPath)
 
-        // Then: at minimum the calyx-ipc section is appended and [general] is present.
-        // The multi-line string content may be partially affected (known limitation).
+        // Then: the multi-line string content is preserved intact and [general] survives
         let content = readConfig()
         XCTAssertTrue(content.contains("[general]"))
+        XCTAssertTrue(content.contains("[not_a_section]"),
+                      "Multi-line string content must be preserved verbatim")
+        XCTAssertTrue(content.contains("This is inside a multi-line string"))
         XCTAssertTrue(content.contains("model = \"gpt-4\""))
         XCTAssertTrue(content.contains("[mcp_servers.calyx-ipc]"))
         XCTAssertTrue(content.contains("http://localhost:41830/mcp"))
@@ -585,5 +585,34 @@ final class CodexConfigManagerTests: XCTestCase {
             }
         }
         // Note: some errors are acceptable (contention), but the file must not be corrupted
+    }
+
+    func test_removeSections_preservesMultiLineStringContent() throws {
+        // Given: config with a multi-line string whose content looks like a calyx-ipc header
+        let content = """
+        [other]
+        matrix = \"\"\"
+        [mcp_servers.calyx-ipc]
+        This line looks like a header but is inside a string
+        \"\"\"
+        value = "hello"
+
+        [mcp_servers.calyx-ipc]
+        url = "http://localhost:41830/mcp"
+        token = "abc"
+        """
+        writeConfig(content)
+
+        // When: disable IPC (which calls removeSections internally)
+        CodexConfigManager.disableIPC(configPath: configPath)
+
+        // Then: the real calyx-ipc section is removed, but string content is intact
+        let result = readConfig()
+        XCTAssertFalse(result.contains("url = \"http://localhost:41830/mcp\""),
+                       "Real calyx-ipc section should be removed")
+        XCTAssertTrue(result.contains("[other]"), "[other] section must survive")
+        XCTAssertTrue(result.contains("value = \"hello\""), "value key must survive")
+        XCTAssertTrue(result.contains("This line looks like a header but is inside a string"),
+                      "Multi-line string content must be preserved verbatim")
     }
 }

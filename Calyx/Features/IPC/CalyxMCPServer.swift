@@ -263,6 +263,9 @@ final class CalyxMCPServer {
         case "heartbeat":
             return await handleHeartbeat(id: id, arguments: arguments)
 
+        case "show_quick_terminal":
+            return handleShowQuickTerminal(id: id)
+
         default:
             return toolError(id: id, text: "Unknown tool: \(toolName)")
         }
@@ -432,6 +435,11 @@ final class CalyxMCPServer {
         }
         let json = "{\"status\":\"ok\"}"
         return toolSuccess(id: id, text: json)
+    }
+
+    private func handleShowQuickTerminal(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
+        QuickTerminalController.shared.toggle()
+        return toolSuccess(id: id, text: "{\"toggled\":true}")
     }
 
     // MARK: - Response Helpers

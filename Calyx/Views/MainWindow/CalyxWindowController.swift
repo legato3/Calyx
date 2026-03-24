@@ -363,6 +363,97 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 }
             ))
         }
+
+        commandRegistry.register(Command(
+            id: "shell.restart",
+            title: "Restart Shell",
+            category: "Terminal",
+            isAvailable: { [weak self] in self?.activeTab?.processExited == true },
+            handler: { [weak self] in
+                guard let self,
+                      let tab = activeTab else { return }
+                let pwd = tab.pwd
+                tabController.closeTab(id: tab.id)
+                tabController.createNewTab(pwd: pwd)
+            }
+        ))
+
+        // Broadcast input toggle
+        commandRegistry.register(Command(
+            id: "split.broadcastInput",
+            title: "Toggle Broadcast Input to All Panes",
+            category: "Splits",
+            isAvailable: { [weak self] in
+                guard let tab = self?.activeTab else { return false }
+                return tab.splitTree.allLeafIDs().count > 1
+            },
+            handler: { [weak self] in
+                guard let self, let tab = activeTab else { return }
+                tab.broadcastInputEnabled.toggle()
+                // Keep compose broadcast in sync with pane broadcast state
+                composeController.broadcastEnabled = tab.broadcastInputEnabled
+                windowActions.composeBroadcastEnabled = tab.broadcastInputEnabled
+            }
+        ))
+
+        // Workspace commands
+        commandRegistry.register(Command(
+            id: "workspace.save",
+            title: "Save Workspace As…",
+            category: "Workspaces",
+            handler: { [weak self] in self?.promptSaveWorkspace() }
+        ))
+
+        for name in WorkspaceManager.list() {
+            commandRegistry.register(Command(
+                id: "workspace.load.\(name)",
+                title: "Load Workspace: \(name)",
+                category: "Workspaces",
+                handler: { [weak self] in self?.loadWorkspace(name: name) }
+            ))
+            commandRegistry.register(Command(
+                id: "workspace.delete.\(name)",
+                title: "Delete Workspace: \(name)",
+                category: "Workspaces",
+                handler: { [weak self] in try? WorkspaceManager.delete(name: name) }
+            ))
+        }
+    }
+
+    private func promptSaveWorkspace() {
+        let alert = NSAlert()
+        alert.messageText = "Save Workspace"
+        alert.informativeText = "Enter a name for this workspace:"
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
+        input.placeholderString = "My Workspace"
+        alert.accessoryView = input
+        alert.window.initialFirstResponder = input
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = input.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+
+        guard let snapshot = windowSnapshot() else { return }
+        do {
+            try WorkspaceManager.save(snapshot, name: name)
+        } catch {
+            let err = NSAlert(error: error)
+            err.runModal()
+        }
+    }
+
+    private func loadWorkspace(name: String) {
+        guard let snapshot = WorkspaceManager.load(name: name) else {
+            let a = NSAlert()
+            a.messageText = "Workspace Not Found"
+            a.informativeText = "The workspace '\(name)' could not be loaded."
+            a.runModal()
+            return
+        }
+        (NSApp.delegate as? AppDelegate)?.openWorkspace(snapshot)
     }
 
     private func setupUI() {
@@ -458,6 +549,11 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         windowActions.onDiscardAllReviews = { [weak self] in self?.reviewController.discardAllDiffReviews() }
         windowActions.onComposeOverlaySend = { [weak self] text in self?.sendComposeText(text) ?? false }
         windowActions.onDismissComposeOverlay = { [weak self] in self?.dismissComposeOverlay() }
+        windowActions.onToggleComposeBroadcast = { [weak self] in
+            guard let self else { return }
+            composeController.broadcastEnabled.toggle()
+            windowActions.composeBroadcastEnabled = composeController.broadcastEnabled
+        }
     }
 
     private func buildMainContentView() -> MainContentView {
@@ -509,6 +605,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private func updateTerminalLayout() {
         guard let tab = activeTab, let container = splitContainerView else { return }
         container.updateLayout(tree: tab.splitTree)
+        container.broadcastInputIndicator = tab.broadcastInputEnabled
     }
 
     private func updateLayout() {
@@ -735,12 +832,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         // Find the tab that owns this surface (may be a background tab)
         guard let (owningTab, owningGroup) = findTab(for: event.surfaceView) else { return }
-        guard let surfaceID = owningTab.registry.id(for: event.surfaceView) else { return }
 
-        // Surface-level cleanup: update split tree and destroy surface
-        let (newTree, focusTarget) = owningTab.splitTree.remove(surfaceID)
-        owningTab.registry.destroySurface(surfaceID)
-        owningTab.splitTree = newTree
+        // Surface-level cleanup delegated to SplitController
+        let focusTarget = splitController.removeSurface(event.surfaceView, fromTab: owningTab)
         invalidateSurfaceToTab()
 
         // If closeTab is handling this tab, skip tab removal (closeTab will do it)
@@ -919,9 +1013,18 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func handleShowChildExitedNotification(_ notification: Notification) {
-        guard let event = GhosttyShowChildExitedEvent.from(notification) else { return }
-        guard let (tab, _) = findTab(for: event.surfaceView) else { return }
-        logger.info("[ChildExited] tab \(tab.id) exit_code=\(event.exitCode) — surface will close via ghosttyCloseSurface")
+        guard let event = GhosttyShowChildExitedEvent.from(notification),
+              let (tab, _) = findTab(for: event.surfaceView) else { return }
+        tab.processExited = true
+        tab.lastExitCode = event.exitCode
+        if event.exitCode != 0 {
+            let seconds = event.runtimeMs / 1000
+            NotificationManager.shared.sendNotification(
+                title: "Process exited",
+                body: "Exit code \(event.exitCode) after \(seconds)s",
+                tabID: tab.id
+            )
+        }
     }
 
     @objc private func handleRendererHealthNotification(_ notification: Notification) {
@@ -931,11 +1034,16 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func handleColorChangeNotification(_ notification: Notification) {
-        guard let event = GhosttyColorChangeEvent.from(notification) else { return }
-        guard belongsToThisWindow(event.surfaceView) else { return }
-        // Color changes sync the terminal background color to the window.
-        // Full implementation pending theme integration.
-        logger.debug("[ColorChange] kind=\(event.change.kind.rawValue) for surface \(String(describing: ObjectIdentifier(event.surfaceView)))")
+        guard let event = GhosttyColorChangeEvent.from(notification),
+              belongsToThisWindow(event.surfaceView),
+              event.change.kind == GHOSTTY_ACTION_COLOR_KIND_BACKGROUND else { return }
+        let c = event.change
+        window?.backgroundColor = NSColor(
+            calibratedRed: CGFloat(c.r) / 255,
+            green: CGFloat(c.g) / 255,
+            blue: CGFloat(c.b) / 255,
+            alpha: 1.0
+        )
     }
 
     @objc private func handleInitialSizeNotification(_ notification: Notification) {

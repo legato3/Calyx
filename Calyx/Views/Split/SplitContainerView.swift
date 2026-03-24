@@ -30,6 +30,18 @@ class SplitContainerView: NSView {
         }
     }
 
+    /// Show or hide a blue top-bar indicating broadcast input mode is active.
+    var broadcastInputIndicator: Bool = false {
+        didSet {
+            guard oldValue != broadcastInputIndicator else { return }
+            if broadcastInputIndicator {
+                installBroadcastOverlay()
+            } else {
+                removeBroadcastOverlay()
+            }
+        }
+    }
+
     private static let minPaneSize: CGFloat = 50
 
     init(registry: SurfaceRegistry) {
@@ -91,6 +103,7 @@ class SplitContainerView: NSView {
 
     override func layout() {
         super.layout()
+        repositionBroadcastBadge()
         guard needsDeferredLayout else { return }
         guard bounds.width > 0 && bounds.height > 0 else { return }
         guard let root = currentTree.root else { return }
@@ -126,6 +139,45 @@ class SplitContainerView: NSView {
             NSEvent.removeMonitor(monitor)
             focusLostEventMonitor = nil
         }
+    }
+
+    // MARK: - Broadcast Input Indicator
+
+    private weak var broadcastBadge: NSView?
+
+    private func installBroadcastOverlay() {
+        guard broadcastBadge == nil else { return }
+        let badge = NSTextField(labelWithString: "⚡ Broadcast input active — all panes receive text")
+        badge.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        badge.textColor = .white
+        badge.backgroundColor = NSColor.systemBlue.withAlphaComponent(0.85)
+        badge.isBezeled = false
+        badge.drawsBackground = true
+        badge.alignment = .center
+        badge.wantsLayer = true
+        badge.layer?.cornerRadius = 3
+        addSubview(badge)
+        broadcastBadge = badge
+        badge.sizeToFit()
+        repositionBroadcastBadge()
+    }
+
+    private func removeBroadcastOverlay() {
+        broadcastBadge?.removeFromSuperview()
+        broadcastBadge = nil
+    }
+
+    private func repositionBroadcastBadge() {
+        guard let badge = broadcastBadge else { return }
+        badge.sizeToFit()
+        let bw = badge.frame.width + 12
+        let bh = badge.frame.height + 4
+        badge.frame = CGRect(
+            x: (bounds.width - bw) / 2,
+            y: bounds.height - bh - 6,
+            width: bw,
+            height: bh
+        )
     }
 
     // MARK: - Recursive Layout

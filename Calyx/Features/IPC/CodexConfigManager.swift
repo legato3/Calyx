@@ -147,8 +147,23 @@ struct CodexConfigManager: Sendable {
 
         var result: [String] = []
         var inSection = false
+        var inMultiLineString = false
 
         for line in lines {
+            // Track TOML triple-quoted multi-line strings so that `[` inside them is not
+            // mistaken for a table header. A line that contains an odd number of `"""`
+            // sequences toggles the open/close state.
+            let tripleQuoteCount = line.components(separatedBy: "\"\"\"").count - 1
+            if tripleQuoteCount % 2 == 1 {
+                inMultiLineString.toggle()
+            }
+
+            if inMultiLineString {
+                // Inside a multi-line string — emit verbatim, never parse as a header
+                result.append(line)
+                continue
+            }
+
             if isSectionHeader(line) {
                 // Start of a calyx-ipc section — skip this line
                 inSection = true

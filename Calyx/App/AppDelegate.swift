@@ -401,6 +401,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    /// Opens new windows for each window in the given workspace snapshot.
+    /// Existing windows are not closed — the workspace windows are added alongside them.
+    func openWorkspace(_ snapshot: SessionSnapshot) {
+        for windowSnap in snapshot.windows {
+            _ = restoreWindow(windowSnap)
+        }
+    }
+
     private func restoreSession() -> Bool {
         let recoveryCount = SessionPersistenceActor.shared.incrementRecoveryCounter()
 

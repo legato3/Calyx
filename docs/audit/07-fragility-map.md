@@ -83,16 +83,15 @@ Hard crash (EXC_BAD_ACCESS) in C callback handler.
 - Any malicious local process running as the same user can still read `~/.config/calyx/browser.json` (inherent to local IPC)
 - State file not cleaned up if app crashes (stale token) — acceptable: token regenerated on next `start()`
 
-## 6. ✅ TOML Parser for Codex Config (hardened)
+## 6. ✅ TOML Parser for Codex Config (fully hardened)
 
 ### What was fragile
 `CodexConfigManager` used hand-coded line-by-line TOML parsing with regex. No actual TOML parser library.
 
 ### What was done
-Added 3 edge-case tests to `CodexConfigManagerTests.swift`:
-- Inline comment on section header (`[mcp_servers.calyx-ipc] # added by Calyx`)
-- Brackets inside values not mistaken for section headers (`matrix = [1, 2, 3]`)
-- Multi-line string with a header-like line (documents known limitation)
+- Added 3 original edge-case tests (inline comments, bracket values, multi-line string)
+- Added triple-quote `"""` state tracking in `removeSections()` — lines inside a multi-line TOML string are now emitted verbatim and never parsed as section headers
+- The previously-documented known limitation (bracket line inside `"""` string treated as section header) is now fixed; test updated to assert correct behavior
 
-### Remaining known limitation
-A TOML multi-line string value whose content starts a line with `[` will be incorrectly treated as a section boundary by `isAnyTableHeader`. This is extremely unlikely in Codex configs but is documented in the test suite.
+### Remaining
+No known parser gaps. The hand-rolled parser covers all realistic Codex config shapes.

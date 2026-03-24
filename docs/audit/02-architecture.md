@@ -74,9 +74,9 @@ If the posting side changes the key name or value type, the receiving side silen
 
 ## Top 5 Structural Risks
 
-### 1. ⚠️ CalyxWindowController (~1,314 lines) — SUBSTANTIALLY MITIGATED
+### 1. ⚠️ CalyxWindowController (~1,350 lines) — SUBSTANTIALLY MITIGATED
 
-11 extraction steps completed (Steps 1-11 of `10-refactor-plan.md`). Extracted: GitController, ReviewController, FocusManager, BrowserManager, ComposeOverlayController, WindowActions, SplitController, IPCWindowController, TabLifecycleController. Remaining: `handleCloseSurfaceNotification` mixes split + tab concerns and stays in CWC. File is still large but responsibilities are cleaner.
+12 extraction / completion steps completed (Steps 1-12 of `10-refactor-plan.md`). Extracted: GitController, ReviewController, FocusManager, BrowserManager, ComposeOverlayController, WindowActions, SplitController, IPCWindowController, TabLifecycleController. `SplitController.removeSurface(_:fromTab:)` added in Step 12 extracts the surface-level work from `handleCloseSurfaceNotification`; tab teardown remains in CWC. Both previously-stubbed notification handlers (`handleColorChangeNotification`, `handleShowChildExitedNotification`) are now fully implemented.
 
 ### 2. ✅ 28 NotificationCenter names with untyped payloads — FIXED
 

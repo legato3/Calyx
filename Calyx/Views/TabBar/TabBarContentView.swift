@@ -359,12 +359,28 @@ private struct TabItemButton: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(tab.title.isEmpty ? fallbackTitle : tab.title)
-                .lineLimit(1)
-                .font(.system(size: 12.5, weight: isActive ? .semibold : .medium, design: .rounded))
-                .tracking(0.18)
-                .foregroundStyle(isActive ? .primary : .secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(tab.title.isEmpty ? fallbackTitle : tab.title)
+                    .lineLimit(1)
+                    .font(.system(size: 12.5, weight: isActive ? .semibold : .medium, design: .rounded))
+                    .tracking(0.18)
+                    .foregroundStyle(isActive ? .primary : .secondary)
+
+                if let pwd = tab.pwd {
+                    Text(shortenedPwd(pwd))
+                        .lineLimit(1)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if tab.processExited {
+                Image(systemName: tab.lastExitCode == 0 ? "checkmark.circle" : "exclamationmark.circle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(tab.lastExitCode == 0 ? Color.secondary : Color.red.opacity(0.8))
+                    .help(tab.lastExitCode == 0 ? "Process exited (code 0)" : "Process exited (code \(tab.lastExitCode ?? 0))")
+            }
 
             if tab.unreadNotifications > 0 {
                 Text(tab.unreadNotifications > 99 ? "99+" : "\(tab.unreadNotifications)")
@@ -415,5 +431,13 @@ private struct TabItemButton: View {
             return url.host() ?? url.absoluteString
         }
         return "Terminal"
+    }
+
+    private func shortenedPwd(_ pwd: String) -> String {
+        let home = NSHomeDirectory()
+        let normalized = pwd.hasPrefix(home) ? "~" + pwd.dropFirst(home.count) : pwd
+        let components = normalized.split(separator: "/", omittingEmptySubsequences: true)
+        guard components.count > 2 else { return normalized }
+        return "…/" + components.suffix(2).joined(separator: "/")
     }
 }

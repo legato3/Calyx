@@ -149,4 +149,18 @@ final class SplitController {
         )
         getSplitContainerView?()?.updateLayout(tree: tab.splitTree)
     }
+
+    // MARK: - Surface Removal
+
+    /// Removes a surface from its tab's split tree, destroys the surface, and returns the
+    /// suggested focus target UUID (if any). The caller is responsible for tab teardown
+    /// when `tab.splitTree.isEmpty` after this call.
+    @discardableResult
+    func removeSurface(_ surfaceView: SurfaceView, fromTab tab: Tab) -> UUID? {
+        guard let surfaceID = tab.registry.id(for: surfaceView) else { return nil }
+        let (newTree, focusTarget) = tab.splitTree.remove(surfaceID)
+        tab.registry.destroySurface(surfaceID)
+        tab.splitTree = newTree
+        return focusTarget
+    }
 }

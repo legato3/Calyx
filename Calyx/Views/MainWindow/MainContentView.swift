@@ -163,11 +163,27 @@ struct MainContentView: View {
                                             onHeightChanged: { windowSession.composeOverlayHeight = $0 }
                                         )
 
-                                        ComposeOverlayContainerView(
-                                            onSend: actions.onComposeOverlaySend,
-                                            onDismiss: actions.onDismissComposeOverlay
-                                        )
-                                        .frame(height: windowSession.composeOverlayHeight)
+                                        ZStack(alignment: .topTrailing) {
+                                            ComposeOverlayContainerView(
+                                                onSend: actions.onComposeOverlaySend,
+                                                onDismiss: actions.onDismissComposeOverlay
+                                            )
+                                            .frame(height: windowSession.composeOverlayHeight)
+
+                                            Button(action: { actions.onToggleComposeBroadcast?() }) {
+                                                Image(systemName: actions.composeBroadcastEnabled
+                                                      ? "antenna.radiowaves.left.and.right.circle.fill"
+                                                      : "antenna.radiowaves.left.and.right.circle")
+                                                    .font(.system(size: 14))
+                                                    .foregroundStyle(actions.composeBroadcastEnabled
+                                                                     ? Color.accentColor : Color.secondary)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .padding(8)
+                                            .help(actions.composeBroadcastEnabled
+                                                  ? "Broadcast: ON — sending to all panes"
+                                                  : "Broadcast: OFF — sending to focused pane")
+                                        }
                                     }
                                     .glassEffect(.clear.tint(chromeTint), in: .rect)
                                 }

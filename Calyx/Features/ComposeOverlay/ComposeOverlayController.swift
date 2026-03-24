@@ -20,6 +20,10 @@ final class ComposeOverlayController {
     /// Set when the overlay opens; cleared when it closes.
     private(set) var targetSurfaceID: UUID?
 
+    /// When `true`, the composed text is sent to every pane in the active tab's split tree
+    /// instead of only the targeted surface.
+    var broadcastEnabled: Bool = false
+
     // MARK: - Overlay Lifecycle
 
     /// Toggles the overlay. Opens it targeting `focusedControllerID`,
@@ -95,7 +99,18 @@ final class ComposeOverlayController {
         } else {
             sendEnterKey(controller)
         }
-        logger.debug("Sent compose text (\(text.count) chars) to surface \(String(describing: self.targetSurfaceID))")
+
+        // Broadcast to all other panes if enabled
+        if broadcastEnabled, let tab = activeTab {
+            for leafID in tab.splitTree.allLeafIDs() {
+                guard let otherController = tab.registry.controller(for: leafID),
+                      otherController.id != controller.id else { continue }
+                otherController.sendText(text)
+                sendEnterKey(otherController)
+            }
+        }
+
+        logger.debug("Sent compose text (\(text.count) chars) to surface \(String(describing: self.targetSurfaceID))\(self.broadcastEnabled ? " [broadcast]" : "")")
         return true
     }
 }

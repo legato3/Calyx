@@ -349,14 +349,20 @@ final class TabLifecycleController {
 ### Risk
 Medium. Many callbacks required (10 view-side effects). All are [weak self] closures wired in CWC.init after super.init().
 
+## Step 12: ✅ Complete Stubbed Handlers + Partial handleCloseSurface Extraction (done)
+
+### handleColorChangeNotification (completed)
+Updates `window.backgroundColor` tint when `change.kind == GHOSTTY_ACTION_COLOR_KIND_BACKGROUND`. The window stays transparent (`isOpaque = false`); the background color serves as a compositor tint hint.
+
+### handleShowChildExitedNotification (completed)
+Sets `tab.processExited = true` and `tab.lastExitCode`. On non-zero exit code posts a desktop notification via `NotificationManager.shared`. Tab bar shows a circle icon (green=0, red=non-zero). "Restart Shell" command palette command enabled when `processExited == true`.
+
+### handleCloseSurfaceNotification (partially extracted)
+`SplitController.removeSurface(_:fromTab:)` now owns split-tree mutation and surface destruction. The CWC handler is reduced to 3 coordination calls. Tab teardown (empty-tree → close tab → window close) remains in CWC as it straddles session and window concerns.
+
 ## Remaining Work
 
-Two notification handlers have incomplete implementations (not yet functional):
-- `handleColorChangeNotification` — logs only; background color sync to window pending theme integration
-- `handleShowChildExitedNotification` — logs only; any "shell exited" UX would go here
-
-One structural item remains:
-- `handleCloseSurfaceNotification` (~40 lines) still in CWC — mixes split-tree removal and tab teardown; deferred because both TabLifecycleController and SplitController would need to participate
+No incomplete stub handlers remain. Structural items still deferred:
 
 ## What NOT to Touch Yet
 

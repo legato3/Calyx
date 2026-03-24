@@ -10,10 +10,15 @@ struct SessionSnapshot: Codable, Equatable {
 
     let schemaVersion: Int
     let windows: [WindowSnapshot]
+    /// Named workspace tag. `nil` for the auto-save slot; set when saving as a named workspace.
+    var workspaceName: String?
 
-    init(schemaVersion: Int = Self.currentSchemaVersion, windows: [WindowSnapshot] = []) {
+    init(schemaVersion: Int = Self.currentSchemaVersion,
+         windows: [WindowSnapshot] = [],
+         workspaceName: String? = nil) {
         self.schemaVersion = schemaVersion
         self.windows = windows
+        self.workspaceName = workspaceName
     }
 }
 
