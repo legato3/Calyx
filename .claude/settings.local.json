@@ -14,7 +14,10 @@
       "Bash(sed -i '' 's/        guard let snapshot = windowSnapshot\\(\\) else { return }/        let windowSnap = windowSnapshot\\(\\)/' /Users/chris/Developer/Xcode/Terminal/Calyx/Views/MainWindow/CalyxWindowController.swift)",
       "Bash(sed -i '' 's/            try WorkspaceManager.save\\(snapshot, name: name\\)/            try WorkspaceManager.save\\(SessionSnapshot\\(windows: [windowSnap]\\), name: name\\)/' /Users/chris/Developer/Xcode/Terminal/Calyx/Views/MainWindow/CalyxWindowController.swift)",
       "Bash(python3:*)",
-      "Bash(xcodegen generate:*)"
+      "Bash(xcodegen generate:*)",
+      "mcp__xcodebuild__session_show_defaults",
+      "mcp__xcodebuild__session_set_defaults",
+      "mcp__xcodebuild__build_sim"
     ]
   }
 }
