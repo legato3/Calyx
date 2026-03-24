@@ -28,6 +28,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private let tabController: TabLifecycleController
     private let ipcController: IPCWindowController
 
+    // Auto-accept monitors keyed by tab ID.
+    private var autoAcceptMonitors: [UUID: AutoAcceptMonitor] = [:]
+
     // O(1) surface-to-tab reverse lookup. Rebuilt lazily after any structural change.
     private var surfaceToTab: [UUID: (tab: Tab, group: TabGroup)] = [:]
     private var surfaceToTabDirty = true
@@ -418,6 +421,13 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 composeController.broadcastEnabled = tab.broadcastInputEnabled
                 windowActions.composeBroadcastEnabled = tab.broadcastInputEnabled
             }
+        ))
+
+        commandRegistry.register(Command(
+            id: "tab.autoAccept",
+            title: "Toggle Auto-Accept Mode",
+            category: "Tab",
+            handler: { [weak self] in self?.toggleAutoAccept() }
         ))
 
         // Workspace commands
@@ -845,6 +855,19 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         composeController.dismiss(windowSession: windowSession) { [weak self] in
             guard let self, case .terminal = self.activeTab?.content else { return }
             self.focusManager.restoreFocus(window: self.window, tab: self.activeTab, splitContainerView: self.splitContainerView)
+        }
+    }
+
+    func toggleAutoAccept() {
+        guard let tab = activeTab else { return }
+        tab.autoAcceptEnabled.toggle()
+        if tab.autoAcceptEnabled {
+            let monitor = AutoAcceptMonitor(tab: tab)
+            autoAcceptMonitors[tab.id] = monitor
+            monitor.start()
+        } else {
+            autoAcceptMonitors[tab.id]?.stop()
+            autoAcceptMonitors.removeValue(forKey: tab.id)
         }
     }
 
@@ -1354,6 +1377,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     // MARK: - Helpers
 
     private func cleanupTabResources(id tabID: UUID) {
+        autoAcceptMonitors[tabID]?.stop()
+        autoAcceptMonitors.removeValue(forKey: tabID)
         tabController.cleanupTabResources(id: tabID)
     }
 

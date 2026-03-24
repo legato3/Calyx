@@ -87,12 +87,14 @@ Sidebar tab listing all files modified *in this session* by Claude:
 
 ---
 
-### 7. Auto-Accept Mode Per Pane
+### 7. Auto-Accept Mode Per Pane ✅ **(Implemented)**
 
 Toggle per pane: when Claude prompts for a tool confirmation, auto-approve it.
 - Visual badge `⚡` on the pane's tab while active
 - Logged locally so the session record shows what was auto-approved
 - This is the single biggest friction point in long autonomous runs
+
+Implemented: `AutoAcceptMonitor` polls each tab's surfaces every 400ms, detects confirmation patterns in the last 12 viewport lines, injects an Enter keypress with 3s cooldown. Visual ⚡ badge in tab bar chip and sidebar row when active. Session log on `Tab.autoAcceptLog`. Toggle via command palette "Toggle Auto-Accept Mode".
 
 ---
 
@@ -138,7 +140,7 @@ Queue multiple tasks for a Codex pane to process one after another:
 ○  Phase 4:           Prompt library + system prompts
 ○  Phase 5:           Pre-edit checkpoint commits
 ✅ Phase 6:           File change tracker
-○  Phase 7:           Auto-accept mode
+✅ Phase 7:           Auto-accept mode
 ○  Phase 8-10:        Visual mesh, token HUD, task queue
 ```
 

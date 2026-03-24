@@ -24,6 +24,10 @@ class Tab: Identifiable {
     var lastExitCode: UInt32? = nil
     /// When `true`, compose overlay broadcasts text to all panes in this tab's split tree.
     var broadcastInputEnabled: Bool = false
+    /// When `true`, Claude Code confirmation prompts are automatically accepted.
+    var autoAcceptEnabled: Bool = false
+    /// Session log of auto-accepted events for this tab.
+    var autoAcceptLog: [AutoAcceptEvent] = []
     let registry: SurfaceRegistry
 
     init(

@@ -347,6 +347,32 @@ enum GhosttyFFI {
         ghostty_surface_free_text(surface, &text)
     }
 
+    /// Read the full visible viewport content as a UTF-8 string.
+    /// Returns nil if the surface cannot be read.
+    static func surfaceReadViewportText(_ surface: ghostty_surface_t) -> String? {
+        var text = ghostty_text_s()
+        let topLeft = ghostty_point_s(
+            tag: GHOSTTY_POINT_VIEWPORT,
+            coord: GHOSTTY_POINT_COORD_TOP_LEFT,
+            x: 0, y: 0
+        )
+        let bottomRight = ghostty_point_s(
+            tag: GHOSTTY_POINT_VIEWPORT,
+            coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT,
+            x: 0, y: 9999
+        )
+        let sel = ghostty_selection_s(top_left: topLeft, bottom_right: bottomRight, rectangle: false)
+        guard ghostty_surface_read_text(surface, sel, &text) else { return nil }
+        defer {
+            var mutableText = text
+            ghostty_surface_free_text(surface, &mutableText)
+        }
+        guard let ptr = text.text, text.text_len > 0 else { return nil }
+        let uint8Ptr = UnsafeRawPointer(ptr).assumingMemoryBound(to: UInt8.self)
+        let buffer = UnsafeBufferPointer(start: uint8Ptr, count: Int(text.text_len))
+        return String(decoding: buffer, as: UTF8.self)
+    }
+
     /// Complete an asynchronous clipboard request.
     static func surfaceCompleteClipboardRequest(_ surface: ghostty_surface_t, data: UnsafePointer<CChar>, state: UnsafeMutableRawPointer?, confirmed: Bool) {
         ghostty_surface_complete_clipboard_request(surface, data, state, confirmed)

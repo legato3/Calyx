@@ -644,6 +644,11 @@ private struct TabRowItemView: View {
                     .onDisappear { claudePulse = false }
                     .help("Claude Code is running in this tab")
             }
+            if tab.autoAcceptEnabled {
+                Text("⚡")
+                    .font(.system(size: 9))
+                    .help("Auto-accept active")
+            }
             Text(tab.title.isEmpty ? fallbackTitle : tab.title)
                 .lineLimit(1)
                 .font(.system(size: 12.5, weight: isActive ? .semibold : .medium, design: .rounded))

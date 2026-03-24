@@ -375,6 +375,12 @@ private struct TabItemButton: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            if tab.autoAcceptEnabled {
+                Text("⚡")
+                    .font(.system(size: 10))
+                    .help("Auto-accept mode active — Claude confirmations are auto-approved")
+            }
+
             if tab.processExited {
                 Image(systemName: tab.lastExitCode == 0 ? "checkmark.circle" : "exclamationmark.circle")
                     .font(.system(size: 10))
