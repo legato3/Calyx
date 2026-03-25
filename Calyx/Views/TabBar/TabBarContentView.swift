@@ -474,6 +474,6 @@ private struct TabItemButton: View {
         let normalized = pwd.hasPrefix(home) ? "~" + pwd.dropFirst(home.count) : pwd
         let components = normalized.split(separator: "/", omittingEmptySubsequences: true)
         guard components.count > 2 else { return normalized }
-        return "…/" + components.suffix(2).joined(separator: "/")
+        return "…/" + components.suffix(1).joined(separator: "/")
     }
 }

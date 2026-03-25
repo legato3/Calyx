@@ -1116,6 +1116,13 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         guard let event = GhosttySetPwdEvent.from(notification) else { return }
         guard belongsToThisWindow(event.surfaceView) else { return }
         guard let (owningTab, _) = findTab(for: event.surfaceView) else { return }
+        // Always cache the pwd on the surface so it's available when focus moves to this pane.
+        event.surfaceView.cachePwd(event.pwd)
+        // Only update tab.pwd when the surface that sent OSC 7 is the focused pane.
+        // Non-focused panes store their pwd on SurfaceView.pwd for retrieval on focus change.
+        guard let focusedID = owningTab.splitTree.focusedLeafID,
+              let focusedView = owningTab.registry.view(for: focusedID),
+              focusedView === event.surfaceView else { return }
         guard owningTab.pwd != event.pwd else { return }
         owningTab.pwd = event.pwd
         requestSave()
@@ -1246,8 +1253,14 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func handleRendererHealthNotification(_ notification: Notification) {
         guard let event = GhosttyRendererHealthEvent.from(notification) else { return }
-        guard findTab(for: event.surfaceView) != nil else { return }
-        logger.warning("[RendererHealth] health=\(event.health.rawValue) for surface \(String(describing: ObjectIdentifier(event.surfaceView)))")
+        guard let (tab, _) = findTab(for: event.surfaceView) else { return }
+        guard event.health == GHOSTTY_RENDERER_HEALTH_UNHEALTHY else { return }
+        logger.error("[RendererHealth] unhealthy renderer for surface \(String(describing: ObjectIdentifier(event.surfaceView)))")
+        NotificationManager.shared.sendNotification(
+            title: "Terminal renderer unhealthy",
+            body: "The GPU renderer stopped responding. Close and reopen this tab to recover.",
+            tabID: tab.id
+        )
     }
 
     @objc private func handleColorChangeNotification(_ notification: Notification) {
@@ -1765,6 +1778,10 @@ extension CalyxWindowController: TerminalControl {
                 tab.splitTree.focusedLeafID = paneID
                 if let view = tab.registry.view(for: paneID) {
                     window?.makeFirstResponder(view)
+                    // Sync tab.pwd from the newly-focused pane's cached pwd (set by OSC 7).
+                    if let surfacePwd = view.pwd {
+                        tab.pwd = surfacePwd
+                    }
                 }
                 // Also switch to this tab if it isn't active
                 if group.activeTabID != tab.id {

@@ -137,12 +137,22 @@ final class ComposeOverlayViewTests: XCTestCase {
 @MainActor
 final class TrustedPasteTests: XCTestCase {
 
+    // Use an isolated instance so tests never touch the live ghostty C runtime.
+    private var controller: GhosttyAppController!
+
+    override func setUp() {
+        super.setUp()
+        controller = GhosttyAppController(forTesting: ())
+    }
+
+    override func tearDown() {
+        controller = nil
+        super.tearDown()
+    }
+
     // ==================== 5. trustedPasteContent Defaults to nil ====================
 
     func test_trustedPasteContent_should_be_nil_by_default() {
-        // Arrange & Act
-        let controller = GhosttyAppController.shared
-
         // Assert
         XCTAssertNil(controller.trustedPasteContent,
                      "trustedPasteContent should be nil when no paste is pending")
@@ -152,7 +162,6 @@ final class TrustedPasteTests: XCTestCase {
 
     func test_trustedPasteContent_should_be_settable_and_readable() {
         // Arrange
-        let controller = GhosttyAppController.shared
         let testContent = "echo 'dangerous command'"
 
         // Act
@@ -162,7 +171,7 @@ final class TrustedPasteTests: XCTestCase {
         XCTAssertEqual(controller.trustedPasteContent, testContent,
                        "trustedPasteContent should return the value that was set")
 
-        // Cleanup -- restore nil so other tests are not affected
+        // Cleanup — reset so tearDown is clean
         controller.trustedPasteContent = nil
     }
 }

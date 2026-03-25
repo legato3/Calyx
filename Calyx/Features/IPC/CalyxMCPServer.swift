@@ -352,6 +352,9 @@ final class CalyxMCPServer {
         case "search_terminal_output":
             return handleSearchTerminalOutput(id: id, arguments: arguments)
 
+        case "wait_for_pane_idle":
+            return await handleWaitForPaneIdle(id: id, arguments: arguments)
+
         default:
             return toolError(id: id, text: "Unknown tool: \(toolName)")
         }
@@ -797,12 +800,14 @@ final class CalyxMCPServer {
     // MARK: - Agent Memory
 
     private func handleRemember(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
-        guard let key = arguments?["key"]?.stringValue, !key.isEmpty,
+        guard let rawKey = arguments?["key"]?.stringValue, !rawKey.isEmpty,
               let value = arguments?["value"]?.stringValue, !value.isEmpty else {
             return toolError(id: id, text: "remember requires non-empty 'key' and 'value'")
         }
         let ttlDays = arguments?["ttl_days"]?.rawValue as? Int
         let workDir = arguments?["work_dir"]?.stringValue
+        let namespace = arguments?["namespace"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+        let key = namespacedKey(rawKey, namespace: namespace)
         let projectKey = resolvedProjectKey(workDir: workDir)
 
         let entry = AgentMemoryStore.shared.remember(
@@ -829,9 +834,15 @@ final class CalyxMCPServer {
     private func handleRecall(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
         let query = arguments?["query"]?.stringValue ?? ""
         let workDir = arguments?["work_dir"]?.stringValue
+        let namespace = arguments?["namespace"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
         let projectKey = resolvedProjectKey(workDir: workDir)
 
-        let entries = AgentMemoryStore.shared.recall(projectKey: projectKey, query: query)
+        var entries = AgentMemoryStore.shared.recall(projectKey: projectKey, query: query)
+        // When a namespace is set, only return keys within that namespace prefix.
+        if let ns = namespace {
+            let prefix = ns + "/"
+            entries = entries.filter { $0.key.hasPrefix(prefix) }
+        }
         let list = entries.map { e -> [String: Any] in
             var item: [String: Any] = ["key": e.key, "value": e.value, "age": e.age]
             if let exp = e.expiresAt { item["expires_at"] = ISO8601DateFormatter().string(from: exp) }
@@ -846,10 +857,12 @@ final class CalyxMCPServer {
     }
 
     private func handleForget(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
-        guard let key = arguments?["key"]?.stringValue, !key.isEmpty else {
+        guard let rawKey = arguments?["key"]?.stringValue, !rawKey.isEmpty else {
             return toolError(id: id, text: "forget requires 'key'")
         }
         let workDir = arguments?["work_dir"]?.stringValue
+        let namespace = arguments?["namespace"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+        let key = namespacedKey(rawKey, namespace: namespace)
         let projectKey = resolvedProjectKey(workDir: workDir)
         let removed = AgentMemoryStore.shared.forget(projectKey: projectKey, key: key)
         if removed { NotificationCenter.default.post(name: .agentMemoryChanged, object: nil) }
@@ -864,9 +877,15 @@ final class CalyxMCPServer {
 
     private func handleListMemories(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
         let workDir = arguments?["work_dir"]?.stringValue
+        let namespace = arguments?["namespace"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
         let projectKey = resolvedProjectKey(workDir: workDir)
 
-        let entries = AgentMemoryStore.shared.listAll(projectKey: projectKey)
+        var entries = AgentMemoryStore.shared.listAll(projectKey: projectKey)
+        // When a namespace is set, only return keys within that namespace prefix.
+        if let ns = namespace {
+            let prefix = ns + "/"
+            entries = entries.filter { $0.key.hasPrefix(prefix) }
+        }
         let list = entries.map { e -> [String: Any] in
             var item: [String: Any] = ["key": e.key, "value": e.value, "age": e.age, "updated_at": ISO8601DateFormatter().string(from: e.updatedAt)]
             if let exp = e.expiresAt { item["expires_at"] = ISO8601DateFormatter().string(from: exp) }
@@ -883,6 +902,14 @@ final class CalyxMCPServer {
     /// Derives the project key from a work_dir string (or falls back to the active tab's pwd).
     private func resolvedProjectKey(workDir: String?) -> String {
         AgentMemoryStore.key(for: workDir ?? resolvedWorkDir())
+    }
+
+    /// Applies an optional namespace prefix to a memory key.
+    /// `namespacedKey("foo", namespace: "orchestrator")` → `"orchestrator/foo"`
+    /// `namespacedKey("foo", namespace: nil)` → `"foo"`
+    private func namespacedKey(_ key: String, namespace: String?) -> String {
+        guard let ns = namespace, !ns.isEmpty else { return key }
+        return "\(ns)/\(key)"
     }
 
     /// Returns the most recent `ShellErrorEvent` across all tabs (or the specific tab if given).
@@ -933,6 +960,82 @@ final class CalyxMCPServer {
             return toolSuccess(id: id, text: "{\"count\":0,\"results\":[]}")
         }
         return toolSuccess(id: id, text: text)
+    }
+
+    // MARK: - Wait For Pane Idle
+
+    /// Polls the target pane's viewport text every 500 ms looking for a shell prompt
+    /// on the last non-empty line. Returns when the shell is idle or the timeout expires.
+    private func handleWaitForPaneIdle(id: JSONRPCId, arguments: [String: AnyCodable]?) async -> (statusCode: Int, body: Data?) {
+        let paneIDStr = arguments?["pane_id"]?.stringValue
+        let rawTimeout = (arguments?["timeout_seconds"]?.rawValue as? Double) ?? 30.0
+        let timeoutSeconds = min(rawTimeout, 300.0)
+
+        let started = Date()
+
+        // Shell-prompt suffixes matching ShellErrorMonitor.
+        let promptSuffixes: [String] = ["$ ", "% ", "❯ ", "➜ ", "> ", "λ ", "# "]
+
+        func isIdle() -> Bool {
+            guard let delegate = TerminalControlBridge.shared.delegate else { return false }
+            let session = delegate.terminalWindowSession
+            let allTabs = session.groups.flatMap(\.tabs)
+
+            // Find the target pane controller.
+            let controller: GhosttySurfaceController?
+            if let paneIDStr, let paneID = UUID(uuidString: paneIDStr) {
+                controller = allTabs.lazy.compactMap { tab in
+                    tab.registry.controller(for: paneID)
+                }.first
+            } else {
+                // No pane_id specified — use the focused pane of the active tab.
+                let activeTab = session.activeGroup?.activeTab
+                if let leafID = activeTab?.splitTree.focusedLeafID {
+                    controller = activeTab?.registry.controller(for: leafID)
+                } else {
+                    controller = nil
+                }
+            }
+
+            guard let ctrl = controller,
+                  let surface = ctrl.surface,
+                  let text = GhosttyFFI.surfaceReadViewportText(surface) else {
+                return false
+            }
+
+            let lines = text.components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+
+            guard let lastLine = lines.last else { return false }
+            return promptSuffixes.contains { lastLine.hasSuffix($0) || lastLine.contains($0) }
+        }
+
+        // Poll every 500 ms until idle or timed out.
+        let pollIntervalNs: UInt64 = 500_000_000
+        while true {
+            if isIdle() {
+                let elapsed = Date().timeIntervalSince(started)
+                let result: [String: Any] = ["idle": true, "elapsed_seconds": elapsed]
+                guard let data = try? JSONSerialization.data(withJSONObject: result),
+                      let text = String(data: data, encoding: .utf8) else {
+                    return toolSuccess(id: id, text: "{\"idle\":true}")
+                }
+                return toolSuccess(id: id, text: text)
+            }
+
+            let elapsed = Date().timeIntervalSince(started)
+            if elapsed >= timeoutSeconds {
+                let result: [String: Any] = ["idle": false, "timed_out": true, "elapsed_seconds": elapsed]
+                guard let data = try? JSONSerialization.data(withJSONObject: result),
+                      let text = String(data: data, encoding: .utf8) else {
+                    return toolSuccess(id: id, text: "{\"idle\":false,\"timed_out\":true}")
+                }
+                return toolSuccess(id: id, text: text)
+            }
+
+            try? await Task.sleep(nanoseconds: pollIntervalNs)
+        }
     }
 
     // MARK: - Project Context

@@ -54,6 +54,28 @@ final class GhosttyAppController {
 
     // MARK: - Initialization
 
+    #if DEBUG
+    /// Test backdoor: an instance with no ghostty C state.
+    ///
+    /// Full dependency injection is not viable here because `init()` passes `self` via
+    /// `Unmanaged.passUnretained` as C callback userdata before the instance is fully
+    /// initialised, and `ghostty_app_t` is an opaque C pointer with no mock-able Swift
+    /// interface. The only safe approach for unit tests that need a `GhosttyAppController`
+    /// instance (e.g. to verify Swift-only properties like `trustedPasteContent`) is to
+    /// skip the ghostty initialisation path entirely and leave `app` as `nil`. All methods
+    /// that call through to ghostty guard-out on `app` being nil, so they are no-ops.
+    ///
+    /// Usage in tests:
+    /// ```swift
+    /// let controller = GhosttyAppController(forTesting: ())
+    /// ```
+    internal init(forTesting _: Void) {
+        self.configManager = GhosttyConfigManager()
+        // `app` remains nil — ghostty C APIs are never called
+        // `readiness` stays `.loading` so callers know this is not a real session
+    }
+    #endif
+
     private init() {
         // Initialize the ghostty library.
         guard GhosttyFFI.initialize() else {

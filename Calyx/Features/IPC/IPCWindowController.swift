@@ -25,10 +25,18 @@ final class IPCWindowController {
     /// Called when IPC review is requested — should open the git sidebar.
     var onShowGitSidebar: (() -> Void)?
 
+    /// Pending role prompts keyed by tab title (role name). Populated during workflow launch;
+    /// consumed when the matching peer calls register_peer.
+    private var pendingRolePrompts: [String: (tab: Tab, prompt: String)] = [:]
+    /// Notification observer token for peerRegistered events. Using NSObjectProtocol boxed
+    /// in a class wrapper so the block-based observer is removed when no longer needed.
+    private var peerRegisteredObserver: NSObjectProtocol?
+
     init(mcpServer: CalyxMCPServer, windowSession: WindowSession) {
         self.mcpServer = mcpServer
         self.windowSession = windowSession
     }
+
 
     // MARK: - IPC Toggle
 
@@ -136,30 +144,94 @@ final class IPCWindowController {
 
         guard autoStart, createdTabs.count == roleNames.count else { return }
 
-        for (index, (tab, roleName)) in zip(createdTabs, roleNames).enumerated() {
-            let baseDelay = Double(index) * 0.15
+        // Build a role-name → (tab, prompt) map so we can inject prompts when
+        // the matching peer calls register_peer rather than after a hardcoded delay.
+        for (tab, roleName) in zip(createdTabs, roleNames) {
+            let prompt = AgentWorkflow.rolePrompt(roleName: roleName, allRoles: roleNames, port: port)
+            pendingRolePrompts[roleName.lowercased()] = (tab: tab, prompt: prompt)
+        }
 
+        // Subscribe to peerRegistered once (idempotent — remove any previous observer first).
+        if let existing = peerRegisteredObserver {
+            NotificationCenter.default.removeObserver(existing)
+        }
+        peerRegisteredObserver = NotificationCenter.default.addObserver(
+            forName: .peerRegistered,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            // Extract Sendable values from the Notification before crossing into the Task.
+            let peerName = note.userInfo?["name"] as? String
+            Task { @MainActor [weak self] in
+                self?.handlePeerRegisteredNamed(peerName)
+            }
+        }
+
+        // Launch Claude in each tab after a short shell-ready delay (keeps the staggered
+        // launch, removes the per-agent hardcoded 3.5 s prompt delay).
+        for (index, tab) in createdTabs.enumerated() {
+            let baseDelay = Double(index) * 0.15
             DispatchQueue.main.asyncAfter(deadline: .now() + baseDelay + 0.8) { [weak self] in
                 guard let self,
                       let leafID = tab.splitTree.focusedLeafID,
                       let controller = tab.registry.controller(for: leafID) else { return }
                 controller.sendText("claude")
                 self.onSendEnterKey?(controller)
+            }
+        }
+    }
 
-                let prompt = AgentWorkflow.rolePrompt(roleName: roleName, allRoles: roleNames, port: port)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
-                    guard let self,
-                          let leafID = tab.splitTree.focusedLeafID,
-                          let controller = tab.registry.controller(for: leafID) else { return }
-                    controller.sendText(prompt)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                        guard let self else { return }
+    // MARK: - Peer Registration Event Handler
+
+    /// Called when any agent calls register_peer. Looks up the matching pending role prompt
+    /// by peer name (which must equal the tab title / role name) and injects it.
+    private func handlePeerRegisteredNamed(_ peerName: String?) {
+        guard let peerName else { return }
+        let key = peerName.lowercased()
+
+        guard let entry = pendingRolePrompts.removeValue(forKey: key) else {
+            // Either not a workflow agent, or already handled.
+            return
+        }
+
+        let tab = entry.tab
+        let prompt = entry.prompt
+
+        // Find the surface controller and inject the prompt.
+        guard let leafID = tab.splitTree.focusedLeafID,
+              let controller = tab.registry.controller(for: leafID) else {
+            // Tab surface not ready yet — fall back to a short delay.
+            logger.warning("IPCWindowController: peerRegistered for '\(peerName)' but tab surface not ready; using 2s fallback")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                guard let leafID = tab.splitTree.focusedLeafID,
+                      let controller = tab.registry.controller(for: leafID) else { return }
+                controller.sendText(prompt)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self else { return }
+                    self.onSendEnterKey?(controller)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         self.onSendEnterKey?(controller)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            self.onSendEnterKey?(controller)
-                        }
                     }
                 }
+            }
+            return
+        }
+
+        logger.info("IPCWindowController: injecting role prompt for peer '\(peerName)'")
+        controller.sendText(prompt)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self else { return }
+            self.onSendEnterKey?(controller)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.onSendEnterKey?(controller)
+            }
+        }
+
+        // If all pending prompts have been consumed, remove the observer.
+        if pendingRolePrompts.isEmpty {
+            if let observer = peerRegisteredObserver {
+                NotificationCenter.default.removeObserver(observer)
+                peerRegisteredObserver = nil
             }
         }
     }

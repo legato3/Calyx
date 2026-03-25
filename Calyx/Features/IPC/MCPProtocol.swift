@@ -310,7 +310,7 @@ struct MCPRouter: Sendable {
         [
             MCPTool(
                 name: "register_peer",
-                description: "Register this Claude Code instance as a peer for IPC communication. Call once per session — if a peer with the same name already exists and hasn't expired, your existing peer ID is returned instead of creating a duplicate.",
+                description: "Register this Claude Code instance as a peer for IPC communication. Call once per session — if a peer with the same name already exists and hasn't expired, your existing peer ID is returned instead of creating a duplicate. Returns your peer_id AND automatically injects live project context (CLAUDE.md content, current git branch, last 5 commits, dirty files, agent memories, failing tests, and active peers) so you can orient yourself without asking the user. Save the returned peer_id — it is required for send_message, receive_messages, broadcast, heartbeat, and report_file_change.",
                 inputSchema: schema(
                     properties: [
                         "name": prop("string", "Peer display name — use something descriptive like your working directory or task (e.g. 'calyx-frontend', 'api-refactor')"),
@@ -547,6 +547,7 @@ struct MCPRouter: Sendable {
                         "value": prop("string", "The fact to remember. Can be multi-sentence."),
                         "ttl_days": prop("integer", "Optional: delete this memory after N days. Omit for permanent storage."),
                         "work_dir": prop("string", "Working directory to scope the memory to. Defaults to the active tab's directory."),
+                        "namespace": prop("string", "Optional namespace prefix for key isolation. Use your peer name (e.g. 'orchestrator') to avoid key collisions with other agents. Keys are stored as '<namespace>/<key>' internally."),
                     ],
                     required: ["key", "value"]
                 )
@@ -558,6 +559,7 @@ struct MCPRouter: Sendable {
                     properties: [
                         "query": prop("string", "Search string. Matches keys and values (case-insensitive). Empty string returns all."),
                         "work_dir": prop("string", "Working directory to scope the search. Defaults to the active tab's directory."),
+                        "namespace": prop("string", "Optional namespace prefix for key isolation. Use your peer name (e.g. 'orchestrator') to avoid key collisions with other agents. Keys are stored as '<namespace>/<key>' internally."),
                     ],
                     required: ["query"]
                 )
@@ -569,6 +571,7 @@ struct MCPRouter: Sendable {
                     properties: [
                         "key": prop("string", "The key of the memory to delete."),
                         "work_dir": prop("string", "Working directory to scope the deletion. Defaults to the active tab's directory."),
+                        "namespace": prop("string", "Optional namespace prefix for key isolation. Use your peer name (e.g. 'orchestrator') to avoid key collisions with other agents. Keys are stored as '<namespace>/<key>' internally."),
                     ],
                     required: ["key"]
                 )
@@ -579,6 +582,7 @@ struct MCPRouter: Sendable {
                 inputSchema: schema(
                     properties: [
                         "work_dir": prop("string", "Working directory to scope the list. Defaults to the active tab's directory."),
+                        "namespace": prop("string", "Optional namespace prefix for key isolation. Use your peer name (e.g. 'orchestrator') to avoid key collisions with other agents. Keys are stored as '<namespace>/<key>' internally."),
                     ]
                 )
             ),
@@ -628,28 +632,88 @@ struct MCPRouter: Sendable {
                     required: ["query"]
                 )
             ),
+            MCPTool(
+                name: "wait_for_pane_idle",
+                description: "Wait until a pane's shell is idle (prompt returned after a command). Use after run_in_pane to know when a command has finished before reading output or running the next command. Returns when idle or after timeout.",
+                inputSchema: schema(
+                    properties: [
+                        "pane_id": prop("string", "UUID of the pane to watch. Defaults to the active pane."),
+                        "timeout_seconds": prop("number", "Maximum seconds to wait (default 30, max 300)."),
+                    ]
+                )
+            ),
         ]
     }
 
     /// Static, trusted instructions text. Never inject user-controlled content.
     static let instructions = """
-    You are connected to Calyx IPC, enabling communication with other Claude Code instances in other terminal panes.
+    You are connected to Calyx IPC — a local MCP server that gives you full awareness of and control over the Calyx terminal environment.
 
-    Immediately after connecting, call register_peer once with a descriptive name based on your current task or working directory, and a role describing your function. Do not call register_peer again in the same session.
+    ## Startup ritual (do this immediately, in order)
 
-    After completing any significant task, call receive_messages to check for messages from other peers. When you receive messages, process them and respond via send_message.
+    1. Call register_peer with a descriptive name and role. This returns your peer_id AND injects live project context (CLAUDE.md, git state, memories, active peers) so you orient yourself without asking the user. Save the peer_id — you need it for all peer tools.
+    2. Call set_tab_title to label your terminal tab with your role (e.g. "orchestrator", "reviewer").
+    3. Call receive_messages to pick up any queued instructions from other agents or the previous session.
 
-    Use list_peers to discover other connected instances. Use broadcast for announcements relevant to all peers.
+    ## What you can do — tool categories
 
-    Messaging tips:
-    - send_message accepts a peer name (e.g. "calyx-frontend") as the 'to' field — no need to look up the UUID first.
-    - Messages include 'fromName' so you know who sent them without a separate list_peers call.
-    - Use the 'topic' field to categorize messages (e.g. "review-request", "task-complete").
-    - Use 'reply_to' with the original message ID to thread replies.
-    - Pass 'since' (the timestamp of the last message you received) to receive_messages to avoid re-reading old messages.
-    - Call heartbeat periodically during long tasks to keep your peer registration alive (expires after 10 minutes of inactivity).
+    ### Peer communication
+    - list_peers — see all active Claude Code instances in this window
+    - send_message — send a task, question, or result to a peer by name (no UUID lookup needed)
+    - broadcast — announce status to all peers at once
+    - receive_messages — poll for incoming messages (use 'since' cursor to avoid re-reading)
+    - heartbeat — call every few minutes during long tasks to stay registered (TTL: 10 min)
 
-    Browser automation tools (browser_*) are available when browser scripting is enabled via the Command Palette. Use browser_snapshot to inspect pages and browser_click/browser_fill to interact with elements. Element refs (@e1, @e2) from snapshots can be used as selectors.
+    ### Terminal control
+    - get_workspace_state — list all tabs and panes with their IDs, titles, and working directories
+    - create_tab — open a new terminal tab, optionally with a command to run immediately
+    - create_split — split the current pane horizontally or vertically
+    - run_in_pane — inject text or commands into any pane by ID
+    - focus_pane — move keyboard focus to a specific pane
+    - set_tab_title — rename any tab
+    - get_pane_output — read the currently selected text from a pane
+    - search_terminal_output — full-text search across all captured terminal history (FTS5)
+
+    ### Task queue (sequential multi-agent coordination)
+    - queue_task — enqueue a prompt for a target agent; tasks run one at a time, result is prepended to the next
+    - complete_task — signal that the current queued task is done and advance the queue
+    - get_queue — inspect queue status (pending/running/completed)
+    - clear_queue — cancel all pending tasks
+
+    ### Persistent memory (survives across sessions, scoped to git repo)
+    - remember — store a key/value fact (architecture decisions, conventions, warnings, commands)
+    - recall — search memories by keyword
+    - list_memories — list all memories for this project
+    - forget — delete a memory by key
+
+    ### Project context and diagnostics
+    - get_project_context — CLAUDE.md, git branch, recent commits, dirty files, memories, failing tests, active peers — call this any time you need to re-orient
+    - get_git_status — current branch and modified files
+    - get_last_error — most recent shell error across all panes (check this after running commands in other panes)
+    - get_session_summary — Calyx session audit log (events, errors routed, tasks completed)
+
+    ### Testing and file tracking
+    - run_tests — trigger a test run in Calyx's Test Runner sidebar
+    - get_test_results — read pass/fail counts and failing test list
+    - report_file_change — notify Calyx's File Changes sidebar when you edit a file
+
+    ### Notifications
+    - show_notification — push a macOS desktop notification (signal completion or errors to the user)
+    - show_quick_terminal — toggle the quick terminal overlay
+
+    ## Multi-agent patterns
+
+    **Orchestrator**: register as "orchestrator", call get_project_context, use queue_task to assign work to implementer/reviewer agents, poll receive_messages for results, broadcast completion.
+    **Implementer**: register, receive task via queue or message, do the work, call report_file_change for each edit, call complete_task when done, send_message result back to orchestrator.
+    **Reviewer**: register, receive review-request messages, read context, send_message findings back.
+
+    ## Messaging tips
+    - send_message 'to' accepts peer name — no UUID lookup needed
+    - Use 'topic' field: "review-request", "task-complete", "question", "error", "status"
+    - Use 'reply_to' with a message ID to thread replies
+    - Pass 'since' to receive_messages as a cursor to avoid re-reading old messages
+
+    Browser automation tools (browser_*) are available when browser scripting is enabled via the Command Palette.
     """
 
     /// Build the response for `initialize`.

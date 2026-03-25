@@ -88,6 +88,10 @@ final class SplitController {
 
         if let targetView = tab.registry.view(for: targetID) {
             window?.makeFirstResponder(targetView)
+            // Sync tab.pwd from the newly-focused pane's cached pwd (set by OSC 7).
+            if let surfacePwd = targetView.pwd {
+                tab.pwd = surfacePwd
+            }
         }
     }
 

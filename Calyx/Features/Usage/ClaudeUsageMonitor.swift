@@ -66,15 +66,44 @@ final class ClaudeUsageMonitor {
 
     static let shared = ClaudeUsageMonitor()
 
-    #if DEBUG
-    /// Test-only: inject a custom home directory to avoid reading from the real ~/.claude.
-    /// Set before calling `start()` or `reload()`.
-    nonisolated(unsafe) static var _testHomeOverride: String? = nil
+    // MARK: - Initialization
 
-    /// Returns the effective monitor instance, respecting any test override.
-    /// Production callers should use `ClaudeUsageMonitor.shared` directly.
-    static var effective: ClaudeUsageMonitor { shared }
+    /// Production init — reads from the real `~/.claude`.
+    private init() {
+        self.homeDirectory = NSHomeDirectory()
+    }
+
+    #if DEBUG
+    /// Test-only init: reads from `homeDirectory` instead of the real home.
+    ///
+    /// Dependency injection is viable here because `ClaudeUsageMonitor` is pure Swift
+    /// (file I/O, `DispatchSource`, `UserDefaults`, notifications). The only external
+    /// dependency that meaningfully varies between test and production is the root path
+    /// used to derive `~/.claude`. Injecting `homeDirectory` lets each test create an
+    /// isolated instance backed by a `tmp` directory, so tests cannot pollute each other
+    /// or read the developer's real Claude history.
+    ///
+    /// Usage:
+    /// ```swift
+    /// let tmp = FileManager.default.temporaryDirectory.path
+    /// let monitor = ClaudeUsageMonitor(homeDirectory: tmp)
+    /// // Populate tmp/.claude/projects/... with fixture JSONL, then:
+    /// monitor.reload()
+    /// ```
+    internal init(homeDirectory: String) {
+        self.homeDirectory = homeDirectory
+    }
     #endif
+
+    // MARK: - Home-relative paths
+
+    /// The home directory this instance reads from.
+    /// Captured at init time so tests can point at a temporary directory.
+    private let homeDirectory: String
+
+    private var claudeDir: String { homeDirectory + "/.claude" }
+    private var projectsDir: String { claudeDir + "/projects" }
+    private var statsCachePath: String { claudeDir + "/stats-cache.json" }
 
     /// Last 30 days of activity, newest first.
     private(set) var recentDays: [DayActivity] = []
@@ -106,8 +135,14 @@ final class ClaudeUsageMonitor {
     }
 
     func reload() {
+        // Capture paths on MainActor before launching the detached task.
+        let capturedProjectsDir = projectsDir
+        let capturedStatsCachePath = statsCachePath
         Task.detached(priority: .utility) {
-            let result = Self.computeSync()
+            let result = Self.computeSync(
+                projectsDir: capturedProjectsDir,
+                statsCachePath: capturedStatsCachePath
+            )
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.recentDays = result.days
@@ -174,7 +209,7 @@ final class ClaudeUsageMonitor {
 
     /// Watch ~/.claude/projects for new/modified JSONL files.
     private func watchProjectsDir() {
-        let path = Self.projectsDir
+        let path = projectsDir
         let fd = open(path, O_EVTONLY)
         guard fd >= 0 else { return }
         let src = DispatchSource.makeFileSystemObjectSource(
@@ -196,15 +231,6 @@ final class ClaudeUsageMonitor {
 
     // MARK: - Parsing (nonisolated — runs off the main actor in a detached task)
 
-    nonisolated private static var claudeDir: String {
-        #if DEBUG
-        return (ClaudeUsageMonitor._testHomeOverride ?? NSHomeDirectory()) + "/.claude"
-        #else
-        return NSHomeDirectory() + "/.claude"
-        #endif
-    }
-    nonisolated private static var projectsDir: String { claudeDir + "/projects" }
-    nonisolated private static let statsCachePath = claudeDir + "/stats-cache.json"
 
     private struct ComputeResult: Sendable {
         var days: [DayActivity]
@@ -215,7 +241,10 @@ final class ClaudeUsageMonitor {
     }
 
     /// Synchronous compute — call only from a detached task, never on the main thread.
-    private nonisolated static func computeSync() -> ComputeResult {
+    private nonisolated static func computeSync(
+        projectsDir: String,
+        statsCachePath: String
+    ) -> ComputeResult {
         var dayMap: [String: DayActivity] = [:]
         var modelMap: [String: ModelActivity] = [:]
         var totalSessions = 0
@@ -223,7 +252,7 @@ final class ClaudeUsageMonitor {
         var firstDate: Date?
 
         // Seed aggregate totals from stats-cache (fast JSON read)
-        if let cache = readStatsCache() {
+        if let cache = readStatsCache(at: statsCachePath) {
             totalSessions = cache.totalSessions
             totalMessages = cache.totalMessages
             firstDate = cache.firstDate
@@ -231,7 +260,7 @@ final class ClaudeUsageMonitor {
 
         // Scan JSONL files modified in the last 30 days for per-day/model detail
         let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-        let paths = Self.collectJSONLFiles(newerThan: cutoff)
+        let paths = Self.collectJSONLFiles(in: projectsDir, newerThan: cutoff)
 
         for path in paths {
             parseJSONL(at: path, dayMap: &dayMap, modelMap: &modelMap)
@@ -257,7 +286,7 @@ final class ClaudeUsageMonitor {
         var firstDate: Date?
     }
 
-    private nonisolated static func readStatsCache() -> CacheSummary? {
+    private nonisolated static func readStatsCache(at statsCachePath: String) -> CacheSummary? {
         guard let data = FileManager.default.contents(atPath: statsCachePath),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
@@ -274,7 +303,10 @@ final class ClaudeUsageMonitor {
 
     // MARK: - File Collection
 
-    private nonisolated static func collectJSONLFiles(newerThan cutoff: Date) -> [String] {
+    private nonisolated static func collectJSONLFiles(
+        in projectsDir: String,
+        newerThan cutoff: Date
+    ) -> [String] {
         let fm = FileManager.default
         guard let projects = try? fm.contentsOfDirectory(atPath: projectsDir) else { return [] }
         var paths: [String] = []

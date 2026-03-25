@@ -74,7 +74,7 @@ final class TabLifecycleController {
               let window = getWindow?(),
               let group = session.activeGroup else { return }
 
-        let tab = Tab()
+        let tab = Tab(pwd: pwd ?? NSHomeDirectory())
 
         var config: ghostty_surface_config_s
         if let inherited = inheritedConfig as? ghostty_surface_config_s {

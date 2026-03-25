@@ -23,8 +23,16 @@ class SurfaceView: NSView {
     /// The current title of the surface as set by the terminal.
     private(set) var title: String = ""
 
-    /// The current working directory.
+    /// The current working directory as last reported by OSC 7.
+    /// Set via `cachePwd(_:)` by the window controller whenever ghostty sends a setPwd action.
     private(set) var pwd: String?
+
+    /// Cache the pwd reported by OSC 7 on this surface.
+    /// The window controller calls this for every surface, focused or not,
+    /// so that when focus moves to a pane its stored pwd can be promoted to `tab.pwd`.
+    func cachePwd(_ newPwd: String) {
+        pwd = newPwd
+    }
 
     /// Whether the view is focused.
     private(set) var focused: Bool = false
