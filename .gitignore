@@ -36,3 +36,4 @@ ghostty/zig-out/
 .build/
 Packages/
 Package.resolved
+.claude/settings.local.json

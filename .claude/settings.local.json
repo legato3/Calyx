@@ -29,7 +29,8 @@
       "mcp__calyx-ipc__send_message",
       "mcp__xcodebuild__discover_projs",
       "Bash(git commit:*)",
-      "Bash(peer_id\" for valid UUIDs. Changed all affected handlers to [String: AnyCodable]? and:*)"
+      "Bash(peer_id\" for valid UUIDs. Changed all affected handlers to [String: AnyCodable]? and:*)",
+      "Skill(yume--swarm)"
     ]
   }
 }
