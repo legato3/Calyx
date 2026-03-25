@@ -81,7 +81,12 @@ struct TestRunnerView: View {
                 .buttonStyle(.plain)
                 .help("Stop test run")
             } else {
-                Button(action: { store.run() }) {
+                Button(action: {
+                    if let pwd = TerminalControlBridge.shared.delegate?.activeTabPwd {
+                        store.workDir = pwd
+                    }
+                    store.run()
+                }) {
                     Image(systemName: "play.fill")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.green)

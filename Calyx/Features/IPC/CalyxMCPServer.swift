@@ -1064,7 +1064,8 @@ final class CalyxMCPServer {
     private func extractClientName(from params: [String: AnyCodable]?) -> String? {
         guard let params,
               let clientInfoDict = extractDict(params, "clientInfo"),
-              let name = clientInfoDict["name"] as? String else {
+              let name = clientInfoDict["name"]?.stringValue,
+              !name.isEmpty else {
             return nil
         }
         return name

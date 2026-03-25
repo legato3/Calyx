@@ -133,18 +133,24 @@ final class TriggerEngine {
             center.addObserver(forName: .shellErrorCaptured, object: nil, queue: .main) { [weak self] note in
                 let snippet = note.userInfo?["snippet"] as? String ?? ""
                 let tab = note.userInfo?["tabTitle"] as? String ?? "unknown"
-                self?.fire(.commandFail, context: ["snippet": snippet, "tab": tab])
+                Task { @MainActor [weak self] in
+                    self?.fire(.commandFail, context: ["snippet": snippet, "tab": tab])
+                }
             },
             center.addObserver(forName: .testRunnerFinished, object: nil, queue: .main) { [weak self] _ in
-                let store = TestRunnerStore.shared
-                guard store.failCount > 0 else { return }
-                let names = store.failures.map(\.name).joined(separator: ", ")
-                self?.fire(.testFail, context: ["test_names": names, "fail_count": "\(store.failCount)"])
+                Task { @MainActor [weak self] in
+                    let store = TestRunnerStore.shared
+                    guard store.failCount > 0 else { return }
+                    let names = store.failures.map(\.name).joined(separator: ", ")
+                    self?.fire(.testFail, context: ["test_names": names, "fail_count": "\(store.failCount)"])
+                }
             },
             center.addObserver(forName: .peerRegistered, object: nil, queue: .main) { [weak self] note in
                 let name = note.userInfo?["name"] as? String ?? "agent"
                 let role = note.userInfo?["role"] as? String ?? ""
-                self?.fire(.peerConnect, context: ["peer_name": name, "peer_role": role])
+                Task { @MainActor [weak self] in
+                    self?.fire(.peerConnect, context: ["peer_name": name, "peer_role": role])
+                }
             },
         ]
         logger.info("TriggerEngine started with \(self.rules.count) rules")
