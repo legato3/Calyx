@@ -73,6 +73,36 @@ class SurfaceView: NSView {
     /// Non-nil when we are inside a keyDown handler.
     private var keyTextAccumulator: [String]? = nil
 
+    // MARK: - Smooth Scrolling
+
+    /// Accumulated pixel offset for smooth scrolling (mirrors ghostty's pending_scroll_y).
+    private var smoothScrollAccumulator: CGFloat = 0
+
+    /// Current visual pixel offset applied via CALayer transform.
+    private(set) var smoothScrollPixelOffset: CGFloat = 0
+
+    /// Debounce timer to reset offset after scrolling quiesces.
+    private var smoothScrollResetTimer: Timer?
+
+    /// Track mouseCaptured transitions for reset.
+    private var lastMouseCapturedState: Bool = false
+
+    /// Track scrollback availability for reset.
+    private var lastHadScrollback: Bool = false
+
+    /// Virtual momentum state for discrete (mouse wheel) smooth scrolling.
+    /// Estimates scroll velocity from notch timing and generates synthetic pixel events.
+    private var scrollVelocity: CGFloat = 0  // pixels per second (fb-pixel space)
+    private var lastNotchTime: CFTimeInterval = 0
+    private var virtualMomentumTimer: Timer?
+    private static let momentumFrameInterval: CFTimeInterval = 1.0 / 120.0
+    private static let momentumFriction: CGFloat = 0.94  // deceleration per frame
+    private static let momentumStopThreshold: CGFloat = 10.0  // px/sec to stop
+    private static let defaultRowDuration: CFTimeInterval = 0.15  // 150ms per row for single notch
+
+    /// Observer for smooth scroll setting changes from Settings UI.
+    private var smoothScrollSettingObserver: NSObjectProtocol?
+
     /// Timestamp of the last performKeyEquivalent event for command-key handling.
     private var lastPerformKeyEvent: TimeInterval?
 
@@ -99,6 +129,11 @@ class SurfaceView: NSView {
 
     deinit {
         MainActor.assumeIsolated {
+            smoothScrollResetTimer?.invalidate()
+            virtualMomentumTimer?.invalidate()
+            if let obs = smoothScrollSettingObserver {
+                NotificationCenter.default.removeObserver(obs)
+            }
             trackingAreas.forEach { removeTrackingArea($0) }
         }
         if _hasSecureInput {
@@ -117,6 +152,17 @@ class SurfaceView: NSView {
         let metalLayer = GhosttyMetalLayer()
         metalLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
         self.layer = metalLayer
+
+        // Observe smooth scroll setting changes to immediately reset active offsets.
+        smoothScrollSettingObserver = NotificationCenter.default.addObserver(
+            forName: .smoothScrollSettingChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.resetSmoothScrollOffset()
+            }
+        }
     }
 
     /// Initialize the ghostty surface for this view.
@@ -181,6 +227,9 @@ class SurfaceView: NSView {
             width: UInt32(fbFrame.width),
             height: UInt32(fbFrame.height)
         )
+
+        // Reset smooth scroll offset on scale change (pixel-to-point ratio invalidated).
+        resetSmoothScrollOffset()
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -200,6 +249,9 @@ class SurfaceView: NSView {
             width: UInt32(scaledSize.width),
             height: UInt32(scaledSize.height)
         )
+
+        // Reset smooth scroll offset on resize (pixel math invalidated).
+        resetSmoothScrollOffset()
 
         // Force re-render on the first real size after surface creation.
         if needsInitialRefresh, window != nil {
@@ -714,7 +766,10 @@ class SurfaceView: NSView {
         super.mouseEntered(with: event)
         let pos = convert(event.locationInWindow, from: nil)
         let mods = EventTranslator.translateModifiers(event.modifierFlags)
-        surfaceController?.sendMousePos(x: pos.x, y: frame.height - pos.y, mods: mods)
+        // Add smoothScrollPixelOffset to compensate for visual shift: the rendered content
+        // is in ghostty's coordinate space (content-space), so we ADD the offset to map
+        // from screen-space click position to the logical content position.
+        surfaceController?.sendMousePos(x: pos.x, y: frame.height - pos.y + smoothScrollPixelOffset, mods: mods)
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -727,7 +782,8 @@ class SurfaceView: NSView {
     override func mouseMoved(with event: NSEvent) {
         let pos = convert(event.locationInWindow, from: nil)
         let mods = EventTranslator.translateModifiers(event.modifierFlags)
-        surfaceController?.sendMousePos(x: pos.x, y: frame.height - pos.y, mods: mods)
+        // See mouseEntered for offset rationale.
+        surfaceController?.sendMousePos(x: pos.x, y: frame.height - pos.y + smoothScrollPixelOffset, mods: mods)
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -765,7 +821,57 @@ class SurfaceView: NSView {
         return ScrollDelta(x: x, y: y)
     }
 
+    // MARK: - Smooth Scroll Helpers
+
+    struct SmoothScrollState: Equatable {
+        var accumulator: CGFloat
+        var pixelOffset: CGFloat
+    }
+
+    /// Mirror ghostty's scroll accumulation (Surface.zig:3423-3435) to compute sub-row pixel offset.
+    static func computeSmoothScrollOffset(
+        currentAccumulator: CGFloat,
+        rawDeltaY: CGFloat,
+        precisionMultiplier: CGFloat,
+        cellHeight: CGFloat
+    ) -> SmoothScrollState {
+        guard cellHeight > 0 else {
+            return SmoothScrollState(accumulator: 0, pixelOffset: 0)
+        }
+        let effectiveDelta = rawDeltaY * precisionMultiplier
+        var newAccumulator = currentAccumulator + effectiveDelta
+        if abs(newAccumulator) >= cellHeight {
+            let rows = (newAccumulator / cellHeight).rounded(.towardZero)
+            newAccumulator -= rows * cellHeight
+        }
+        return SmoothScrollState(accumulator: newAccumulator, pixelOffset: newAccumulator)
+    }
+
+    /// Clamp smooth scroll accumulator at scrollback boundaries.
+    static func clampSmoothScrollAtBoundary(
+        accumulator: CGFloat,
+        isAtTop: Bool,
+        isAtBottom: Bool
+    ) -> CGFloat {
+        if isAtTop && accumulator > 0 { return 0 }
+        if isAtBottom && accumulator < 0 { return 0 }
+        return accumulator
+    }
+
+    /// Ease-out interpolation for discrete scroll animation.
+    static func discreteScrollEaseOut(progress: CGFloat) -> CGFloat {
+        let t = max(0, min(1, progress))
+        return 1 - (1 - t) * (1 - t)
+    }
+
     override func scrollWheel(with event: NSEvent) {
+        // When smooth scrolling is active for discrete events, we intercept and
+        // drip-feed pixels to ghostty instead of sending the original tick event.
+        if !event.hasPreciseScrollingDeltas && isSmoothScrollActive() {
+            startVirtualMomentumScroll(ticks: event.scrollingDeltaY)
+            return
+        }
+
         let delta = Self.adjustScrollDeltas(
             deltaX: event.scrollingDeltaX,
             deltaY: event.scrollingDeltaY,
@@ -774,6 +880,194 @@ class SurfaceView: NSView {
 
         let mods = EventTranslator.translateScrollMods(event)
         surfaceController?.sendMouseScroll(x: delta.x, y: delta.y, mods: mods)
+
+        // Smooth scrolling for trackpad (precision)
+        guard isSmoothScrollActive() else {
+            if smoothScrollPixelOffset != 0 { resetSmoothScrollOffset() }
+            return
+        }
+
+        updateSmoothScrollOffset(rawDeltaY: event.scrollingDeltaY)
+
+        if event.momentumPhase == .ended || event.momentumPhase == .cancelled {
+            scheduleResetTimer()
+        } else {
+            smoothScrollResetTimer?.invalidate()
+            smoothScrollResetTimer = nil
+        }
+    }
+
+    // MARK: - Smooth Scroll Instance Methods
+
+    /// Whether smooth scrolling should be active.
+    private func isSmoothScrollActive() -> Bool {
+        // Check user setting (default true)
+        guard UserDefaults.standard.object(forKey: "smoothScrollEnabled") as? Bool ?? true else { return false }
+        guard let surfaceController else { return false }
+        // Disabled when mouse is captured (mouse reporting / most alternate screen apps)
+        if surfaceController.mouseCaptured { return false }
+        // Disabled when no scrollback (alternate screen without mouse reporting)
+        if let scrollbar = surfaceController.scrollbar,
+           scrollbar.total <= scrollbar.len { return false }
+        // Disabled before first scrollbar callback
+        guard surfaceController.scrollbar != nil else { return false }
+        return true
+    }
+
+    /// Cell height in points (cachedCellSize is in framebuffer pixels).
+    private func cellHeightInPoints() -> CGFloat {
+        let scale = window?.backingScaleFactor ?? 2.0
+        guard scale > 0 else { return 0 }
+        return cachedCellSize.height / scale
+    }
+
+    /// Update smooth scroll offset for precision (trackpad) scrolling.
+    /// The accumulator operates in the same unit space as ghostty (rawDelta * 2.0),
+    /// with cachedCellSize.height (fb pixels) as the row threshold.
+    /// The visual pixelOffset is then converted to points for the CALayer transform.
+    private func updateSmoothScrollOffset(rawDeltaY: CGFloat) {
+        // Use fb-pixel cell height so the accumulator wraps at the same row boundary as ghostty.
+        let cellH = cachedCellSize.height
+        let state = Self.computeSmoothScrollOffset(
+            currentAccumulator: smoothScrollAccumulator,
+            rawDeltaY: rawDeltaY,
+            precisionMultiplier: 2.0,
+            cellHeight: cellH
+        )
+        smoothScrollAccumulator = state.accumulator
+
+        // Clamp at scrollback boundaries
+        if let scrollbar = surfaceController?.scrollbar,
+           scrollbar.total >= scrollbar.len {
+            let isAtTop = scrollbar.offset == 0
+            let isAtBottom = scrollbar.offset >= scrollbar.total - scrollbar.len
+            smoothScrollAccumulator = Self.clampSmoothScrollAtBoundary(
+                accumulator: smoothScrollAccumulator,
+                isAtTop: isAtTop,
+                isAtBottom: isAtBottom
+            )
+        }
+
+        // Convert accumulator (fb-pixel space) to points for the visual transform.
+        let scale = window?.backingScaleFactor ?? 2.0
+        smoothScrollPixelOffset = smoothScrollAccumulator / scale
+        applySmoothScrollTransform()
+    }
+
+    /// Reset smooth scroll offset to zero.
+    func resetSmoothScrollOffset() {
+        guard smoothScrollPixelOffset != 0 || smoothScrollAccumulator != 0 else { return }
+        smoothScrollAccumulator = 0
+        smoothScrollPixelOffset = 0
+        smoothScrollResetTimer?.invalidate()
+        smoothScrollResetTimer = nil
+        stopVirtualMomentum()
+        applySmoothScrollTransform()
+    }
+
+    /// Apply the current smooth scroll offset as a CALayer transform.
+    private func applySmoothScrollTransform() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if smoothScrollPixelOffset == 0 {
+            layer?.transform = CATransform3DIdentity
+        } else {
+            layer?.transform = CATransform3DMakeTranslation(0, -smoothScrollPixelOffset, 0)
+        }
+        CATransaction.commit()
+    }
+
+    /// Schedule a debounce timer to reset offset after scrolling quiesces.
+    private func scheduleResetTimer() {
+        smoothScrollResetTimer?.invalidate()
+        smoothScrollResetTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.resetSmoothScrollOffset()
+            }
+        }
+    }
+
+    /// Start or update virtual momentum scrolling from a discrete mouse wheel notch.
+    /// Estimates velocity from the interval between notch events.
+    private func startVirtualMomentumScroll(ticks: CGFloat) {
+        let cellH = cachedCellSize.height
+        guard cellH > 0 else { return }
+
+        let now = CACurrentMediaTime()
+        let timeSinceLastNotch = now - lastNotchTime
+        let direction: CGFloat = ticks >= 0 ? 1 : -1
+
+        if lastNotchTime > 0 && timeSinceLastNotch < 0.5 && timeSinceLastNotch > 0.001 {
+            // Continuous scrolling: velocity from notch interval
+            let notchVelocity = cellH / CGFloat(timeSinceLastNotch) * direction
+            // Blend with current velocity for smoothness
+            scrollVelocity = scrollVelocity * 0.3 + notchVelocity * 0.7
+        } else {
+            // Fresh start or long pause: use default speed
+            scrollVelocity = cellH / CGFloat(Self.defaultRowDuration) * direction
+        }
+
+        lastNotchTime = now
+
+        guard virtualMomentumTimer == nil else { return }
+        virtualMomentumTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.momentumFrameInterval,
+            repeats: true
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.tickVirtualMomentum()
+            }
+        }
+    }
+
+    /// Generate one frame's worth of synthetic pixels based on current velocity.
+    private func tickVirtualMomentum() {
+        let pixelsThisFrame = scrollVelocity * CGFloat(Self.momentumFrameInterval)
+
+        // Send to ghostty as precision scroll (same path as trackpad)
+        let precisionMods = ghostty_input_scroll_mods_t(1)
+        surfaceController?.sendMouseScroll(x: 0, y: Double(pixelsThisFrame), mods: precisionMods)
+
+        // Feed through accumulator (rawDelta = amount / 2.0 to match adjustScrollDeltas 2x)
+        updateSmoothScrollOffset(rawDeltaY: pixelsThisFrame / 2.0)
+
+        // Decelerate
+        scrollVelocity *= Self.momentumFriction
+
+        // Stop when velocity is negligible
+        if abs(scrollVelocity) < Self.momentumStopThreshold {
+            stopVirtualMomentum()
+            scheduleResetTimer()
+        }
+    }
+
+    /// Stop virtual momentum scrolling.
+    private func stopVirtualMomentum() {
+        virtualMomentumTimer?.invalidate()
+        virtualMomentumTimer = nil
+        scrollVelocity = 0
+    }
+
+    /// Check scrollbar state transitions and reset smooth scroll if needed.
+    func checkScrollbarStateTransitions() {
+        guard let surfaceController else { return }
+
+        let currentCaptured = surfaceController.mouseCaptured
+        if currentCaptured && !lastMouseCapturedState {
+            resetSmoothScrollOffset()
+        }
+        lastMouseCapturedState = currentCaptured
+
+        let currentHasScrollback: Bool
+        if let scrollbar = surfaceController.scrollbar {
+            currentHasScrollback = scrollbar.total > scrollbar.len
+        } else {
+            currentHasScrollback = false
+        }
+        if !currentHasScrollback && lastHadScrollback {
+            resetSmoothScrollOffset()
+        }
+        lastHadScrollback = currentHasScrollback
     }
 
     override func pressureChange(with event: NSEvent) {
@@ -868,9 +1162,11 @@ extension SurfaceView: @preconcurrency NSTextInputClient {
         let cellSize = surfaceController.cellSize
 
         // Ghostty coordinates are top-left origin; convert to bottom-left for AppKit.
+        // SUBTRACT smoothScrollPixelOffset here (opposite sign from sendMousePos) because
+        // this converts FROM content-space TO screen-space for IME candidate placement.
         let viewRect = NSRect(
             x: imePos.x,
-            y: frame.height - imePos.y,
+            y: frame.height - imePos.y - smoothScrollPixelOffset,
             width: max(imePos.width, cellSize.width),
             height: max(imePos.height, cellSize.height)
         )

@@ -154,6 +154,7 @@ class SurfaceScrollView: NSView {
         setupObservers()
         setupSearchObservers()
         surfaceView.scrollbarUpdateHandler = { [weak self] state in
+            self?.surfaceView.checkScrollbarStateTransitions()
             self?.handleScrollbarUpdate(state)
         }
     }
@@ -265,6 +266,13 @@ class SurfaceScrollView: NSView {
 
     override func layout() {
         super.layout()
+
+        // Enable clipping for smooth scroll CATransform3D overflow.
+        // Done here (not init) because the layer needs a non-zero bounds first.
+        if let layer, !layer.masksToBounds {
+            layer.masksToBounds = true
+        }
+
         synchronizeLayout()
     }
 
@@ -391,6 +399,7 @@ class SurfaceScrollView: NSView {
 
     @objc private func scrollViewWillStartLiveScroll(_ notification: Notification) {
         isLiveScrolling = true
+        surfaceView.resetSmoothScrollOffset()
     }
 
     @objc private func scrollViewDidLiveScroll(_ notification: Notification) {

@@ -567,4 +567,5 @@ extension Notification.Name {
     static let calyxIPCLaunchWorkflow = Notification.Name("com.calyx.ipc.launchWorkflow")
     /// Posted when any agent sends a message with topic "review-request"
     static let calyxIPCReviewRequested = Notification.Name("com.calyx.ipc.reviewRequested")
+    static let smoothScrollSettingChanged = Notification.Name("com.calyx.smoothScrollSettingChanged")
 }

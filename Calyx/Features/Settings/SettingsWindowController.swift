@@ -285,6 +285,22 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let resetButton = NSButton(title: "Reset to Ghostty Defaults", target: self, action: #selector(resetTerminalSettings(_:)))
         resetButton.bezelStyle = .rounded
         root.addArrangedSubview(resetButton)
+        // --- Scrolling Section ---
+        let scrollingDivider = NSBox()
+        scrollingDivider.boxType = .separator
+        scrollingDivider.translatesAutoresizingMaskIntoConstraints = false
+        scrollingDivider.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        root.addArrangedSubview(scrollingDivider)
+
+        let scrollingTitle = NSTextField(labelWithString: "Scrolling")
+        scrollingTitle.font = .systemFont(ofSize: 20, weight: .semibold)
+        root.addArrangedSubview(scrollingTitle)
+
+        let smoothScrollSwitch = NSSwitch()
+        smoothScrollSwitch.state = (UserDefaults.standard.object(forKey: "smoothScrollEnabled") as? Bool ?? true) ? .on : .off
+        smoothScrollSwitch.target = self
+        smoothScrollSwitch.action = #selector(smoothScrollDidChange(_:))
+        root.addArrangedSubview(row(label: "Smooth Scrolling", control: smoothScrollSwitch))
 
         // Divider before config info section
         let configDivider = NSBox()
@@ -547,6 +563,14 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         NotificationCenter.default.post(name: .glassOpacityDidChange, object: nil, userInfo: ["opacity": opacity])
         applyOpacityToRunningSurfaces()
         fieldDidChange(sender)
+    }
+
+    @objc private func smoothScrollDidChange(_ sender: NSSwitch) {
+        let enabled = sender.state == .on
+        UserDefaults.standard.set(enabled, forKey: "smoothScrollEnabled")
+        if !enabled {
+            NotificationCenter.default.post(name: .smoothScrollSettingChanged, object: nil)
+        }
     }
 
     @objc private func presetDidChange(_ sender: Any?) {

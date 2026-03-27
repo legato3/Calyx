@@ -15,6 +15,7 @@ A macOS 26+ native terminal application built on [libghostty](https://github.com
 - **Desktop Notifications** -- OSC 9/99/777 support with rate limiting
 - **Browser Integration** -- WKWebView tabs alongside terminal tabs (http/https only, non-persistent storage, popup blocking)
 - **Scrollback Search** -- `Cmd+F` to search terminal scrollback with match highlighting, `Cmd+G`/`Cmd+Shift+G` to navigate matches
+- **Smooth Scrolling** -- trackpad uses full smooth pixel scrolling via sub-row CALayer transform; notched mouse wheel adds a velocity-based animation for smoother transitions. Togglable in Settings
 - **Native Scrollbar** -- system overlay scrollbar for terminal scrollback
 - **Cursor Click-to-Move** -- click on a prompt line to reposition cursor (requires shell integration)
 - **Git Source Control** -- sidebar Changes view with working changes (staged/unstaged/untracked), commit graph with branch visualization, and inline diff viewer with review comments
