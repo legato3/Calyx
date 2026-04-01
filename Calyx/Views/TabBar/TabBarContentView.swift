@@ -416,6 +416,7 @@ private struct TabItemButton: View {
                     .frame(width: 16, height: 16)
             }
             .buttonStyle(.plain)
+            .closeButtonHoverHighlight(size: 16, isVisible: (isHovering || isActive) && !isEditing)
             .opacity(isHovering || isActive ? 1 : 0)
             .allowsHitTesting((isHovering || isActive) && !isEditing)
             .accessibilityIdentifier(AccessibilityID.TabBar.tabCloseButton(tab.id))

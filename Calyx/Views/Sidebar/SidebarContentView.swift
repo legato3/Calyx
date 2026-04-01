@@ -261,6 +261,8 @@ private struct GroupSectionView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .allowsHitTesting(isHoveringHeader)
+                    .closeButtonHoverHighlight(size: 20, isVisible: isHoveringHeader, hoverOpacity: 0.08)
                     .accessibilityIdentifier(AccessibilityID.Sidebar.groupCloseAllButton(group.id))
 
                     // Right: collapse toggle button
@@ -507,7 +509,8 @@ private struct TabRowItemView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .allowsHitTesting(!isEditing)
+            .closeButtonHoverHighlight(size: 16, isVisible: (isHovering || isActive) && !isEditing)
+            .allowsHitTesting((isHovering || isActive) && !isEditing)
             .accessibilityIdentifier(AccessibilityID.Sidebar.tabCloseButton(tab.id))
         }
         .contentShape(Rectangle())
