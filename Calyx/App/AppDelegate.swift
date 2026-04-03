@@ -15,6 +15,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingURLs: [URL] = []
     private var quickTerminalController: QuickTerminalController?
 
+    /// Set when the user has already confirmed quit (prevents double-prompting
+    /// between windowShouldClose and applicationShouldTerminate).
+    var isTerminationConfirmed = false
+
     var allWindowControllers: [CalyxWindowController] {
         windowControllers
     }
@@ -79,28 +83,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.arguments.contains("--uitesting") {
             return .terminateNow
         }
-        guard let app = GhosttyAppController.shared.app else {
+
+        // Already confirmed (from windowShouldClose on last-window close path)
+        if isTerminationConfirmed {
+            isTerminationConfirmed = false
             return .terminateNow
         }
 
-        if ghostty_app_needs_confirm_quit(app) {
-            let alert = NSAlert()
-            alert.messageText = "Quit Calyx?"
-            alert.informativeText = "A process is still running. Do you want to quit?"
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "Quit")
-            alert.addButton(withTitle: "Cancel")
-
-            let response = alert.runModal()
-            if response == .alertSecondButtonReturn {
-                return .terminateCancel
-            }
-        }
-
-        if !SettingsWindowController.shared.confirmTermination() {
+        // Cmd+Q path: run confirmations
+        if !confirmQuitIfNeeded() {
             return .terminateCancel
         }
 
+        isTerminationConfirmed = true
         return .terminateNow
     }
 
@@ -233,6 +228,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func isClosingLastManagedWindow(_ controller: CalyxWindowController) -> Bool {
         windowControllers.count == 1 && windowControllers.first === controller
+    }
+
+    /// Returns true if the app should proceed with quit, false if user cancelled.
+    func confirmQuitIfNeeded() -> Bool {
+        // 1. Check for running processes
+        if let app = GhosttyAppController.shared.app,
+           ghostty_app_needs_confirm_quit(app) {
+            let alert = NSAlert()
+            alert.messageText = "Quit Calyx?"
+            alert.informativeText = "A process is still running. Do you want to quit?"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Quit")
+            alert.addButton(withTitle: "Cancel")
+
+            if alert.runModal() == .alertSecondButtonReturn {
+                return false
+            }
+        }
+
+        // 2. Check for unsaved Settings
+        if !SettingsWindowController.shared.confirmTermination() {
+            return false
+        }
+
+        return true
     }
 
     func closingWouldTerminate(_ controller: CalyxWindowController) -> Bool {

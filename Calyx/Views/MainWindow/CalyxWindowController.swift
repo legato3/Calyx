@@ -1497,11 +1497,22 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if let appDelegate = NSApp.delegate as? AppDelegate,
-           appDelegate.closingWouldTerminate(self),
-           !SettingsWindowController.shared.confirmTermination() {
+        guard let appDelegate = NSApp.delegate as? AppDelegate,
+              appDelegate.closingWouldTerminate(self) else {
+            return true
+        }
+
+        // Already confirmed (from Cmd+Q → applicationShouldTerminate)
+        if appDelegate.isTerminationConfirmed {
+            return true
+        }
+
+        // Last-window close via X button: run confirmations
+        if !appDelegate.confirmQuitIfNeeded() {
             return false
         }
+
+        appDelegate.isTerminationConfirmed = true
         return true
     }
 
