@@ -73,6 +73,7 @@ struct SidebarContentView: View {
                     }
                 railButton(mode: .mesh, icon: "network", help: "Mesh")
                 railButton(mode: .taskQueue, icon: "checklist", help: "Task Queue")
+                railButton(mode: .agentPermissions, icon: "lock.shield", help: "Agent Permissions")
                 railButton(mode: .usage, icon: "chart.bar.fill", help: "Usage")
                 railButton(mode: .context, icon: "doc.text.fill", help: "Context")
                 railButton(mode: .fileChanges, icon: "clock.arrow.circlepath", help: "File Changes")
@@ -146,6 +147,9 @@ struct SidebarContentView: View {
                 .padding(.top, 4)
         case .triggers:
             TriggerEngineView()
+                .padding(.top, 4)
+        case .agentPermissions:
+            AgentPermissionsView()
                 .padding(.top, 4)
         case .auditLog:
             SessionAuditView()

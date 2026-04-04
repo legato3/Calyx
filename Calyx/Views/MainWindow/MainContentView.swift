@@ -180,6 +180,7 @@ struct MainContentView: View {
                                             || !(activeTab?.commandBlocks.isEmpty ?? true)
                                             || activeTab?.ollamaAgentSession != nil
                                             || activeTab?.lastShellError != nil
+                                            || !actions.activeAISuggestions.isEmpty
                                         let composeBarHeight = hasExpandedContent
                                             ? max(windowSession.composeOverlayHeight, 260)
                                             : 122
@@ -194,6 +195,10 @@ struct MainContentView: View {
                                             broadcastEnabled: actions.composeBroadcastEnabled,
                                             isExpanded: windowSession.showComposeOverlay,
                                             pwd: activeTab?.pwd,
+                                            activeAISuggestions: actions.activeAISuggestions,
+                                            nextCommandSuggestion: actions.nextCommandSuggestion,
+                                            suggestedDiffStatus: actions.suggestedDiffStatus,
+                                            attachedBlockIDs: actions.attachedBlockIDs,
                                             onToggleExpanded: { actions.onToggleComposeOverlay?() },
                                             onToggleBroadcast: { actions.onToggleComposeBroadcast?() },
                                             onSend: actions.onComposeOverlaySend,
@@ -204,7 +209,14 @@ struct MainContentView: View {
                                             onExplainCommandBlock: actions.onExplainCommandBlock,
                                             onFixCommandBlock: actions.onFixCommandBlock,
                                             onApproveAgent: actions.onApproveOllamaAgent,
-                                            onStopAgent: actions.onStopOllamaAgent
+                                            onStopAgent: actions.onStopOllamaAgent,
+                                            onAcceptSuggestion: { actions.onAcceptActiveAISuggestion?($0) },
+                                            onDismissSuggestions: { actions.onDismissActiveAISuggestions?() },
+                                            onAcceptNextCommand: { actions.onAcceptNextCommand?() },
+                                            onAcceptDiff: { actions.onAcceptSuggestedDiff?($0) },
+                                            onDismissDiff: { actions.onDismissSuggestedDiff?() },
+                                            onAttachBlock: { actions.onAttachBlock?($0) },
+                                            onDetachBlock: { actions.onDetachBlock?($0) }
                                         )
                                         .frame(height: composeBarHeight)
                                     }
@@ -371,6 +383,18 @@ private struct ComposeCommandBarView: View {
     let onFixCommandBlock: ((UUID) -> Void)?
     let onApproveAgent: (() -> Bool)?
     let onStopAgent: (() -> Void)?
+    // Active AI
+    var activeAISuggestions: [ActiveAISuggestion] = []
+    var nextCommandSuggestion: String? = nil
+    var suggestedDiffStatus: SuggestedDiffStatus = .idle
+    var attachedBlockIDs: Set<UUID> = []
+    var onAcceptSuggestion: ((ActiveAISuggestion) -> Void)? = nil
+    var onDismissSuggestions: (() -> Void)? = nil
+    var onAcceptNextCommand: (() -> String?)? = nil
+    var onAcceptDiff: ((SuggestedDiff) -> Void)? = nil
+    var onDismissDiff: (() -> Void)? = nil
+    var onAttachBlock: ((UUID) -> Void)? = nil
+    var onDetachBlock: ((UUID) -> Void)? = nil
 
     @State private var gitBranch: String? = nil
 
@@ -378,60 +402,18 @@ private struct ComposeCommandBarView: View {
         Array(commandBlocks.prefix(isExpanded ? 6 : 1))
     }
 
-    private var latestCollapsedAssistantEntry: ComposeAssistantEntry? {
-        assistant.interactions.first
-    }
-
-    private var latestCollapsedCommandBlock: TerminalCommandBlock? {
-        visibleCommandBlocks.first
-    }
-
-    private var isOllamaMode: Bool {
-        assistant.mode == .ollamaCommand || assistant.mode == .ollamaAgent
-    }
-
-    private var isThinking: Bool {
-        assistant.isBusy || agentSession?.status == .planning
-    }
-
     var body: some View {
-        VStack(spacing: 10) {
-            header
-
-            if isExpanded, let shellError {
-                errorBanner(shellError)
+        VStack(spacing: 0) {
+            // Warp-style: agent conversation view has distinct background
+            if assistant.mode.isAgentMode && (isExpanded || agentSession != nil || !assistant.interactions.isEmpty) {
+                agentConversationPanel
+            } else if isExpanded {
+                expandedShellPanel
             }
 
-            if isExpanded {
-                expandedContent
-            } else {
-                collapsedContent
-            }
-
-            VStack(spacing: 6) {
-                ComposeOverlayContainerView(
-                    text: Binding(
-                        get: { assistant.draftText },
-                        set: { assistant.setDraftText($0) }
-                    ),
-                    onSend: onSend,
-                    onDismiss: onDismiss,
-                    placeholderText: assistant.placeholderText
-                )
-                .frame(minHeight: 78, maxHeight: 108)
-
-                HStack {
-                    Text(modeHintText)
-                    Spacer()
-                    Text("Esc closes")
-                }
-                .font(.system(size: 10, design: .rounded))
-                .foregroundStyle(.secondary)
-            }
+            // Warp-style input bar — always visible, minimal chrome
+            warpInputBar
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 10)
-        .padding(.bottom, 12)
         .task(id: pwd) {
             guard let pwd else { gitBranch = nil; return }
             gitBranch = await TerminalContextGatherer.runTool(
@@ -440,246 +422,426 @@ private struct ComposeCommandBarView: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            Picker(
-                "",
-                selection: Binding(
-                    get: { assistant.mode },
-                    set: { assistant.mode = $0 }
+    // MARK: - Warp-style Input Bar
+
+    private var warpInputBar: some View {
+        VStack(spacing: 0) {
+            // Suggested Code Diff panel (highest priority — shown above everything)
+            if case .ready(let diff) = suggestedDiffStatus {
+                SuggestedDiffPanel(
+                    diff: diff,
+                    onAccept: { onAcceptDiff?(diff) },
+                    onDismiss: { onDismissDiff?() }
                 )
-            ) {
-                ForEach(ComposeAssistantMode.allCases) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 250)
-
-            if let branch = gitBranch {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 9))
-                    Text(branch)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.secondary.opacity(0.12), in: Capsule())
-                .foregroundStyle(.secondary)
-            }
-
-            if isOllamaMode {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(ollamaModel.isEmpty ? OllamaCommandService.defaultModel : ollamaModel)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    Text(ollamaEndpoint.isEmpty ? OllamaCommandService.defaultEndpoint : ollamaEndpoint)
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-
-            if isThinking {
+            } else if case .generating = suggestedDiffStatus {
                 HStack(spacing: 6) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text(agentSession?.status == .planning ? "Planning…" : "Thinking…")
-                        .font(.system(size: 11, design: .rounded))
+                    ProgressView().controlSize(.mini)
+                    Text("Generating fix…")
+                        .font(.system(size: 10, design: .rounded))
                         .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cancel") { onDismissDiff?() }
+                        .buttonStyle(.plain).font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Color.orange.opacity(0.06))
+            }
+
+            // Active AI suggestion chips
+            if !activeAISuggestions.isEmpty {
+                ActiveAISuggestionBar(
+                    suggestions: activeAISuggestions,
+                    onAccept: { onAcceptSuggestion?($0) },
+                    onDismiss: { onDismissSuggestions?() }
+                )
+            }
+
+            // Attached blocks indicator
+            if !attachedBlockIDs.isEmpty {
+                AttachedBlocksBar(
+                    blocks: commandBlocks.filter { attachedBlockIDs.contains($0.id) },
+                    onDetach: { onDetachBlock?($0) }
+                )
+            }
+
+            contextHintBar
+            HStack(alignment: .bottom, spacing: 8) {
+                modeSelectorButton
+                ZStack(alignment: .bottomLeading) {
+                    ComposeOverlayContainerView(
+                        text: Binding(get: { assistant.draftText }, set: { assistant.setDraftText($0) }),
+                        onSend: onSend,
+                        onDismiss: onDismiss,
+                        onCmdReturn: {
+                            if assistant.mode == .shell && assistant.detectedIntent == .agent {
+                                assistant.mode = .claudeAgent
+                            } else if assistant.mode == .claudeAgent || assistant.mode.isAgentMode {
+                                let text = assistant.draftText
+                                _ = onSend?(text)
+                            }
+                        },
+                        placeholderText: assistant.placeholderText
+                    )
+                    .frame(minHeight: 36, maxHeight: 96)
+
+                    // Next-command ghost text overlay
+                    if let ghost = nextCommandSuggestion,
+                       !ghost.isEmpty,
+                       assistant.mode == .shell,
+                       ghost.lowercased().hasPrefix(assistant.draftText.lowercased()),
+                       ghost != assistant.draftText {
+                        let suffix = String(ghost.dropFirst(assistant.draftText.count))
+                        HStack(spacing: 0) {
+                            Text(assistant.draftText)
+                                .foregroundStyle(Color.clear)
+                            Text(suffix)
+                                .foregroundStyle(Color.secondary.opacity(0.45))
+                            Spacer()
+                        }
+                        .font(.system(size: 14, design: .monospaced))
+                        .padding(.leading, 13)
+                        .padding(.top, 10)
+                        .allowsHitTesting(false)
+                    }
+
+                    // Auto-detected intent badge
+                    if assistant.mode == .shell,
+                       !assistant.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        let intent = assistant.detectedIntent
+                        if intent != .ambiguous {
+                            HStack(spacing: 3) {
+                                Circle()
+                                    .fill(intent == .agent ? Color.purple : Color.green)
+                                    .frame(width: 5, height: 5)
+                                Text(intent.label)
+                                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                                    .foregroundStyle(intent == .agent ? Color.purple : Color.green)
+                            }
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(Capsule().fill((intent == .agent ? Color.purple : Color.green).opacity(0.12)))
+                            .offset(x: 8, y: -4)
+                            .allowsHitTesting(false)
+                        }
+                    }
+                }
+                VStack(spacing: 4) {
+                    Button(action: onToggleBroadcast) {
+                        Image(systemName: broadcastEnabled
+                              ? "antenna.radiowaves.left.and.right.circle.fill"
+                              : "antenna.radiowaves.left.and.right.circle")
+                            .font(.system(size: 13))
+                            .foregroundStyle(broadcastEnabled ? Color.accentColor : Color.secondary.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                    .help(broadcastEnabled ? "Broadcast ON" : "Broadcast OFF")
+
+                    Button(action: onToggleExpanded) {
+                        Image(systemName: isExpanded ? "chevron.down.circle" : "chevron.up.circle")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color.secondary.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                    .help(isExpanded ? "Collapse" : "Expand history")
                 }
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
 
-            Spacer()
-
-            if !assistant.interactions.isEmpty {
-                Button("Clear") { assistant.clearHistory() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
-
-            Button(isExpanded ? "Collapse" : "Expand", action: onToggleExpanded)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-            Button(action: onToggleBroadcast) {
-                Image(systemName: broadcastEnabled
-                      ? "antenna.radiowaves.left.and.right.circle.fill"
-                      : "antenna.radiowaves.left.and.right.circle")
-                    .font(.system(size: 14))
-                    .foregroundStyle(broadcastEnabled ? Color.accentColor : Color.secondary)
-            }
-            .buttonStyle(.plain)
-            .help(broadcastEnabled
-                  ? "Broadcast: ON — sending to all panes"
-                  : "Broadcast: OFF — sending to focused pane")
-        }
-    }
-
-    @ViewBuilder
-    private var expandedContent: some View {
-        if visibleCommandBlocks.isEmpty && assistant.interactions.isEmpty && agentSession == nil {
-            emptyState
-        } else {
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    if let agentSession {
-                        agentSection(agentSession)
+            // Next-command accept hint
+            if let ghost = nextCommandSuggestion, !ghost.isEmpty, assistant.mode == .shell {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.right").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text("→ to accept: \(ghost.prefix(50))\(ghost.count > 50 ? "…" : "")")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                    Spacer()
+                    Button("→ Accept") {
+                        if let accepted = onAcceptNextCommand?() {
+                            assistant.setDraftText(accepted)
+                        }
                     }
-
-                    if !visibleCommandBlocks.isEmpty {
-                        commandBlockSection(title: "Recent Commands", blocks: visibleCommandBlocks)
-                    }
-
-                    if !assistant.interactions.isEmpty {
-                        assistantSection
-                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(Color.accentColor)
                 }
-                .padding(.horizontal, 1)
+                .padding(.horizontal, 12).padding(.bottom, 4)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .layoutPriority(1)
-            .scrollIndicators(.hidden)
         }
     }
+
+    // MARK: - Context Hint Bar (Warp-style message bar)
 
     @ViewBuilder
-    private var collapsedContent: some View {
-        if let agentSession,
-           shouldPrioritizeAgentSession(agentSession) {
-            ComposeAgentSessionCard(
-                session: agentSession,
-                compact: true,
-                onApprove: { _ = onApproveAgent?() },
-                onStop: { onStopAgent?() }
-            )
-        } else if let entry = latestCollapsedAssistantEntry,
-           shouldPrioritizeAssistantEntry(entry) {
-            ComposeAssistantEntryCard(
-                entry: entry,
-                compact: true,
-                onEdit: { _ = onApplyEntry?(entry.id, false) },
-                onRun: { _ = onApplyEntry?(entry.id, true) },
-                onExplain: { onExplainEntry?(entry.id) },
-                onFix: { onFixEntry?(entry.id) }
-            )
-        } else if let block = latestCollapsedCommandBlock {
-            ComposeCommandBlockCard(
-                block: block,
-                compact: true,
-                onExplain: { onExplainCommandBlock?(block.id) },
-                onFix: { onFixCommandBlock?(block.id) }
-            )
-        } else if let shellError {
-            compactBanner(shellError.snippet, systemImage: "exclamationmark.triangle.fill", tint: .orange)
-        } else {
-            compactBanner(
-                assistant.mode == .ollamaAgent
-                    ? "Give the agent a task, approve its next command, then let it continue from command results."
-                    : assistant.mode == .ollamaCommand
-                    ? "Ask Ollama for a command or expand to inspect recent command history."
-                    : "Type a command or expand to inspect recent command history and follow-up actions.",
-                systemImage: "terminal",
-                tint: .secondary
-            )
+    private var contextHintBar: some View {
+        let hint = contextHint
+        if !hint.text.isEmpty {
+            HStack(spacing: 6) {
+                if let icon = hint.icon {
+                    Image(systemName: icon).font(.system(size: 10)).foregroundStyle(hint.tint)
+                }
+                Text(hint.text)
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(hint.tint.opacity(0.85))
+                    .lineLimit(1)
+                Spacer()
+                if let actionLabel = hint.actionLabel, let onAction = hint.onAction {
+                    Button(actionLabel, action: onAction)
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(Color.accentColor)
+                }
+                Text("Esc")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.quaternary)
+                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 3).fill(Color.white.opacity(0.06)))
+            }
+            .padding(.horizontal, 12).padding(.vertical, 5)
+            .background(hint.tint.opacity(0.06))
         }
     }
 
-    private func shouldPrioritizeAssistantEntry(_ entry: ComposeAssistantEntry) -> Bool {
-        guard let block = latestCollapsedCommandBlock else { return true }
-        return entry.createdAt >= block.startedAt
+    private struct ContextHint {
+        var text: String
+        var icon: String?
+        var tint: Color
+        var actionLabel: String?
+        var onAction: (() -> Void)?
     }
 
-    private var modeHintText: String {
+    private var contextHint: ContextHint {
+        if let shellError, assistant.mode == .shell {
+            return ContextHint(
+                text: "Last command failed — ⌘↩ to fix",
+                icon: "exclamationmark.triangle.fill", tint: .orange,
+                actionLabel: "Fix",
+                onAction: { if let e = assistant.latestRunnableEntry { onFixEntry?(e.id) } }
+            )
+        }
+        if let session = agentSession, session.canApprove {
+            return ContextHint(
+                text: "Agent is waiting — approve the next command",
+                icon: "checkmark.circle", tint: .orange,
+                actionLabel: "Approve", onAction: { _ = onApproveAgent?() }
+            )
+        }
+        if let session = agentSession, session.status == .runningCommand {
+            return ContextHint(
+                text: "Agent running step \(session.iteration)…",
+                icon: "arrow.trianglehead.2.clockwise.rotate.90", tint: .accentColor,
+                actionLabel: "Stop", onAction: { onStopAgent?() }
+            )
+        }
+        if agentSession?.status == .planning || assistant.isBusy {
+            return ContextHint(text: "Thinking…", icon: "ellipsis", tint: .secondary)
+        }
+        let draft = assistant.draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !draft.isEmpty && assistant.mode == .shell {
+            let intent = assistant.detectedIntent
+            if intent == .agent {
+                return ContextHint(
+                    text: "Looks like a prompt — ⌘↩ to send to Claude",
+                    icon: "sparkles", tint: .purple,
+                    actionLabel: "Use Claude", onAction: { assistant.mode = .claudeAgent }
+                )
+            }
+            return ContextHint(text: "↩ to run  ·  Shift-↩ for newline", tint: .secondary)
+        }
         switch assistant.mode {
         case .shell:
-            return "Return sends the command. Shift-Return inserts a newline."
-        case .ollamaCommand:
-            return "Return asks Ollama for a command. Shift-Return inserts a newline."
-        case .ollamaAgent:
-            return "Return starts an agent run. Approve each proposed command from the card above."
-        }
-    }
-
-    private func shouldPrioritizeAgentSession(_ session: OllamaAgentSession) -> Bool {
-        if let entry = latestCollapsedAssistantEntry,
-           entry.createdAt > session.updatedAt {
-            return false
-        }
-        if let block = latestCollapsedCommandBlock,
-           block.startedAt > session.updatedAt,
-           session.status.isTerminal {
-            return false
-        }
-        return true
-    }
-
-    private func agentSection(_ session: OllamaAgentSession) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Agent")
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(.secondary)
-            ComposeAgentSessionCard(
-                session: session,
-                compact: false,
-                onApprove: { _ = onApproveAgent?() },
-                onStop: { onStopAgent?() }
+            let hasHistory = !commandBlocks.isEmpty || !assistant.interactions.isEmpty
+            return ContextHint(
+                text: hasHistory ? "⌘↩ new agent  ·  ↑ expand history" : "⌘↩ to start an agent session",
+                tint: .secondary
             )
+        case .ollamaCommand:
+            return ContextHint(text: "↩ to ask Ollama for a command", icon: "wand.and.stars", tint: .secondary)
+        case .ollamaAgent:
+            return ContextHint(text: "↩ to start local agent loop", icon: "cpu", tint: .secondary)
+        case .claudeAgent:
+            return ContextHint(text: "↩ to launch Claude Code agent in a new tab", icon: "sparkles", tint: .purple)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func commandBlockSection(title: String, blocks: [TerminalCommandBlock]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(.secondary)
-            ForEach(blocks) { block in
-                ComposeCommandBlockCard(
-                    block: block,
-                    compact: false,
-                    onExplain: { onExplainCommandBlock?(block.id) },
-                    onFix: { onFixCommandBlock?(block.id) }
-                )
+    // MARK: - Mode Selector
+
+    private var modeSelectorButton: some View {
+        Menu {
+            ForEach(ComposeAssistantMode.allCases) { mode in
+                Button { assistant.mode = mode } label: {
+                    Label(mode.displayName, systemImage: modeIcon(mode))
+                }
+            }
+        } label: {
+            Image(systemName: modeIcon(assistant.mode))
+                .font(.system(size: 14))
+                .foregroundStyle(assistant.mode.isAgentMode ? Color.purple : Color.secondary)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(
+                    assistant.mode.isAgentMode ? Color.purple.opacity(0.12) : Color.white.opacity(0.06)
+                ))
+        }
+        .menuStyle(.borderlessButton)
+        .frame(width: 28, height: 28)
+        .help("Switch input mode (\(assistant.mode.displayName))")
+    }
+
+    private func modeIcon(_ mode: ComposeAssistantMode) -> String {
+        switch mode {
+        case .shell: return "terminal"
+        case .ollamaCommand: return "wand.and.stars"
+        case .ollamaAgent: return "cpu"
+        case .claudeAgent: return "sparkles"
+        }
+    }
+
+    // MARK: - Agent Conversation Panel (Warp-style dedicated view)
+
+    private var agentConversationPanel: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles").font(.system(size: 11, weight: .semibold)).foregroundStyle(.purple)
+                Text(assistant.mode == .claudeAgent ? "Claude Agent" : "Agent")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                if let branch = gitBranch {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.triangle.branch").font(.system(size: 9))
+                        Text(branch).font(.system(size: 10, weight: .medium, design: .monospaced))
+                    }
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(.secondary.opacity(0.1), in: Capsule())
+                    .foregroundStyle(.secondary)
+                }
+                if isThinking {
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.mini)
+                        Text(agentSession?.status == .planning ? "Planning…" : "Thinking…")
+                            .font(.system(size: 10, design: .rounded)).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if !assistant.interactions.isEmpty {
+                    Button("Clear") { assistant.clearHistory() }
+                        .buttonStyle(.plain).font(.system(size: 10, design: .rounded)).foregroundStyle(.secondary)
+                }
+                Button(action: onToggleExpanded) {
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Color.purple.opacity(0.06))
+
+            Divider().opacity(0.3)
+
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    if let agentSession {
+                        WarpAgentSessionView(
+                            session: agentSession,
+                            onApprove: { _ = onApproveAgent?() },
+                            onStop: { onStopAgent?() }
+                        )
+                    }
+                    ForEach(assistant.interactions) { entry in
+                        WarpAssistantEntryView(
+                            entry: entry,
+                            onEdit: { _ = onApplyEntry?(entry.id, false) },
+                            onRun: { _ = onApplyEntry?(entry.id, true) },
+                            onExplain: { onExplainEntry?(entry.id) },
+                            onFix: { onFixEntry?(entry.id) }
+                        )
+                    }
+                    if assistant.interactions.isEmpty && agentSession == nil {
+                        VStack(spacing: 8) {
+                            Image(systemName: "sparkles").font(.system(size: 24)).foregroundStyle(.purple.opacity(0.5))
+                            Text("Ask Claude to build, fix, or explain something.")
+                                .font(.system(size: 11, design: .rounded)).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                            Text("Claude Code will open in a new tab and work autonomously.")
+                                .font(.system(size: 10, design: .rounded)).foregroundStyle(.tertiary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity).padding(.vertical, 24)
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 10)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity).layoutPriority(1).scrollIndicators(.hidden)
+        }
+        .background(Color.purple.opacity(0.03))
+    }
+
+    // MARK: - Expanded Shell Panel
+
+    @ViewBuilder
+    private var expandedShellPanel: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "terminal").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                Text("History").font(.system(size: 11, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+                if let branch = gitBranch {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.triangle.branch").font(.system(size: 9))
+                        Text(branch).font(.system(size: 10, weight: .medium, design: .monospaced))
+                    }
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(.secondary.opacity(0.1), in: Capsule()).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if !assistant.interactions.isEmpty {
+                    Button("Clear") { assistant.clearHistory() }
+                        .buttonStyle(.plain).font(.system(size: 10, design: .rounded)).foregroundStyle(.secondary)
+                }
+                Button(action: onToggleExpanded) {
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            Divider().opacity(0.3)
+            if let shellError {
+                errorBanner(shellError).padding(.horizontal, 12).padding(.top, 8)
+            }
+            if visibleCommandBlocks.isEmpty && assistant.interactions.isEmpty {
+                Text("Run commands, then use Explain or Fix on the resulting blocks.")
+                    .font(.system(size: 11, design: .rounded)).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 20).padding(.horizontal, 12)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(visibleCommandBlocks) { block in
+                            ComposeCommandBlockCard(
+                                block: block, compact: false,
+                                isAttached: attachedBlockIDs.contains(block.id),
+                                onExplain: { onExplainCommandBlock?(block.id) },
+                                onFix: { onFixCommandBlock?(block.id) },
+                                onAttach: { onAttachBlock?(block.id) },
+                                onDetach: { onDetachBlock?(block.id) }
+                            )
+                        }
+                        ForEach(assistant.interactions) { entry in
+                            ComposeAssistantEntryCard(
+                                entry: entry,
+                                onEdit: { _ = onApplyEntry?(entry.id, false) },
+                                onRun: { _ = onApplyEntry?(entry.id, true) },
+                                onExplain: { onExplainEntry?(entry.id) },
+                                onFix: { onFixEntry?(entry.id) }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity).layoutPriority(1).scrollIndicators(.hidden)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var assistantSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Assistant")
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(.secondary)
-            ForEach(assistant.interactions) { entry in
-                ComposeAssistantEntryCard(
-                    entry: entry,
-                    onEdit: { _ = onApplyEntry?(entry.id, false) },
-                    onRun: { _ = onApplyEntry?(entry.id, true) },
-                    onExplain: { onExplainEntry?(entry.id) },
-                    onFix: { onFixEntry?(entry.id) }
-                )
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    // MARK: - Helpers
 
-    private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Run commands from here, then reuse the resulting blocks for Explain, Fix, or reruns.")
-                .font(.system(size: 11, design: .rounded))
-                .foregroundStyle(.secondary)
-            Text("Shell, one-shot Ollama suggestions, and the approval-based agent loop all stay in the same terminal bar.")
-                .font(.system(size: 10, design: .rounded))
-                .foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-        )
+    private var isThinking: Bool {
+        assistant.isBusy || agentSession?.status == .planning
     }
 
     @ViewBuilder
@@ -687,51 +849,227 @@ private struct ComposeCommandBarView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label("Latest shell error", systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(.orange)
+                    .font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.orange)
                 Spacer()
                 if let entry = assistant.latestRunnableEntry {
                     HStack(spacing: 6) {
-                        Button("Explain") { onExplainEntry?(entry.id) }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        Button("Fix") { onFixEntry?(entry.id) }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
+                        Button("Explain") { onExplainEntry?(entry.id) }.buttonStyle(.bordered).controlSize(.small)
+                        Button("Fix") { onFixEntry?(entry.id) }.buttonStyle(.borderedProminent).controlSize(.small)
+                    }
+                }
+            }
+            Text(shellError.snippet)
+                .font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
+                .lineLimit(5).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.orange.opacity(0.08)))
+    }
+}
+
+// MARK: - Warp-style Agent Session View
+
+private struct WarpAgentSessionView: View {
+    let session: OllamaAgentSession
+    let onApprove: () -> Void
+    let onStop: () -> Void
+
+    private var statusColor: Color {
+        switch session.status {
+        case .planning: return .secondary
+        case .awaitingApproval: return .orange
+        case .runningCommand: return .accentColor
+        case .completed: return .green
+        case .failed: return .red
+        case .stopped: return .secondary
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Goal header
+            HStack(spacing: 8) {
+                Image(systemName: "target").font(.system(size: 11)).foregroundStyle(.purple)
+                Text(session.goal)
+                    .font(.system(size: 12, weight: .medium, design: .rounded)).lineLimit(2)
+                Spacer()
+                HStack(spacing: 4) {
+                    if session.status == .planning || session.status == .runningCommand {
+                        ProgressView().controlSize(.mini).scaleEffect(0.7)
+                    } else {
+                        Circle().fill(statusColor).frame(width: 6, height: 6)
+                    }
+                    Text(session.status.label)
+                        .font(.system(size: 10, weight: .medium, design: .rounded)).foregroundStyle(statusColor)
+                }
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(statusColor.opacity(0.1), in: Capsule())
+            }
+
+            // Step timeline
+            if !session.steps.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(session.steps.prefix(8).enumerated()), id: \.element.id) { idx, step in
+                        WarpAgentStepRow(step: step, isLast: idx == session.steps.prefix(8).count - 1)
                     }
                 }
             }
 
-            Text(shellError.snippet)
-                .font(.system(size: 10, design: .monospaced))
-                .textSelection(.enabled)
-                .lineLimit(5)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // Pending command approval
+            if let pendingCommand = session.pendingCommand, !pendingCommand.isEmpty, session.canApprove {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "terminal.fill").font(.system(size: 10)).foregroundStyle(.orange)
+                        Text("Proposed command")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded)).foregroundStyle(.orange)
+                        Spacer()
+                    }
+                    Text(pendingCommand)
+                        .font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
+                        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    HStack(spacing: 8) {
+                        Button { onApprove() } label: {
+                            Label("Approve & Run", systemImage: "play.fill")
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        }
+                        .buttonStyle(.borderedProminent).controlSize(.small).tint(.orange)
+                        Button("Stop", action: onStop).buttonStyle(.bordered).controlSize(.small)
+                    }
+                }
+                .padding(10)
+                .background(Color.orange.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.2), lineWidth: 1))
+            }
+
+            if !session.status.isTerminal && !session.canApprove {
+                HStack {
+                    Spacer()
+                    Button("Stop Agent", action: onStop).buttonStyle(.bordered).controlSize(.small)
+                }
+            }
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.orange.opacity(0.08))
-        )
+        .padding(12)
+        .background(Color.purple.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.purple.opacity(0.12), lineWidth: 1))
+    }
+}
+
+// MARK: - Warp-style Agent Step Row
+
+private struct WarpAgentStepRow: View {
+    let step: OllamaAgentStep
+    let isLast: Bool
+
+    private var stepIcon: String {
+        switch step.kind {
+        case .goal: return "target"
+        case .plan: return "list.bullet"
+        case .command: return "terminal"
+        case .observation: return "eye"
+        case .summary: return "checkmark.circle.fill"
+        case .error: return "xmark.circle.fill"
+        }
     }
 
-    private func compactBanner(_ text: String, systemImage: String, tint: Color) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(tint)
-            Text(text)
-                .font(.system(size: 10, design: .rounded))
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-            Spacer()
+    private var stepColor: Color {
+        switch step.kind {
+        case .goal: return .purple
+        case .plan: return .accentColor
+        case .command: return .primary
+        case .observation: return .secondary
+        case .summary: return .green
+        case .error: return .red
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-        )
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(spacing: 0) {
+                Image(systemName: stepIcon).font(.system(size: 10)).foregroundStyle(stepColor)
+                    .frame(width: 18, height: 18)
+                    .background(stepColor.opacity(0.1), in: Circle())
+                if !isLast {
+                    Rectangle().fill(Color.secondary.opacity(0.15)).frame(width: 1).frame(maxHeight: .infinity)
+                }
+            }
+            .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.kind.title)
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(stepColor.opacity(0.8))
+                    .textCase(.uppercase).tracking(0.5)
+                if let command = step.command, !command.isEmpty {
+                    Text(command)
+                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(.primary)
+                        .textSelection(.enabled).lineLimit(2)
+                }
+                if !step.text.isEmpty && step.text != step.command {
+                    Text(step.text)
+                        .font(.system(size: 10, design: .rounded)).foregroundStyle(.secondary).lineLimit(3)
+                }
+            }
+            .padding(.bottom, 8)
+        }
+    }
+}
+
+// MARK: - Warp-style Assistant Entry View
+
+private struct WarpAssistantEntryView: View {
+    let entry: ComposeAssistantEntry
+    let onEdit: () -> Void
+    let onRun: () -> Void
+    let onExplain: () -> Void
+    let onFix: () -> Void
+
+    private var entryColor: Color {
+        switch entry.status {
+        case .failed: return .red
+        case .ran, .inserted: return .green
+        default: return .accentColor
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(entry.kind.title)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded)).foregroundStyle(entryColor)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(entryColor.opacity(0.1), in: Capsule())
+                if entry.status == .pending { ProgressView().controlSize(.mini).scaleEffect(0.7) }
+                Spacer()
+                Text(entry.createdAt.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 9, design: .rounded)).foregroundStyle(.quaternary)
+            }
+            Text(entry.prompt)
+                .font(.system(size: 10, design: .rounded)).foregroundStyle(.tertiary).lineLimit(1)
+            if !entry.primaryText.isEmpty && entry.primaryText != entry.prompt {
+                Text(entry.primaryText)
+                    .font(entry.usesMonospacedBody
+                          ? .system(size: 12, design: .monospaced)
+                          : .system(size: 11, design: .rounded))
+                    .foregroundStyle(entry.status == .failed ? .red : .primary)
+                    .textSelection(.enabled).lineLimit(6).frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8).background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+            }
+            if entry.canRun || entry.canExplain || entry.canFix {
+                HStack(spacing: 6) {
+                    if entry.canInsert { Button("Edit", action: onEdit).buttonStyle(.bordered).controlSize(.small) }
+                    if entry.canRun {
+                        Button(entry.kind == .shellDispatch ? "Run Again" : "Run", action: onRun)
+                            .buttonStyle(.borderedProminent).controlSize(.small)
+                    }
+                    if entry.canExplain { Button("Explain", action: onExplain).buttonStyle(.bordered).controlSize(.small) }
+                    if entry.canFix { Button("Fix", action: onFix).buttonStyle(.bordered).controlSize(.small) }
+                    Spacer()
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -846,8 +1184,11 @@ private struct ComposeAgentSessionCard: View {
 private struct ComposeCommandBlockCard: View {
     let block: TerminalCommandBlock
     let compact: Bool
+    var isAttached: Bool = false
     let onExplain: () -> Void
     let onFix: () -> Void
+    var onAttach: (() -> Void)? = nil
+    var onDetach: (() -> Void)? = nil
 
     private var statusTint: Color {
         switch block.status {
@@ -912,6 +1253,27 @@ private struct ComposeCommandBlockCard: View {
                         Button("Fix", action: onFix)
                     }
                     Spacer()
+                    // Warp-style block attachment
+                    if isAttached {
+                        Button {
+                            onDetach?()
+                        } label: {
+                            Label("Attached", systemImage: "paperclip.circle.fill")
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.accentColor)
+                    } else {
+                        Button {
+                            onAttach?()
+                        } label: {
+                            Label("Attach", systemImage: "paperclip")
+                                .font(.system(size: 10, design: .rounded))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Attach this block's output to the next agent prompt")
+                    }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -1073,6 +1435,187 @@ private final class TerminalGlassHostView: NSView {
                 splitContainerView.topAnchor.constraint(equalTo: topAnchor),
                 splitContainerView.bottomAnchor.constraint(equalTo: bottomAnchor),
             ])
+        }
+    }
+}
+
+// MARK: - Active AI Suggestion Bar
+
+private struct ActiveAISuggestionBar: View {
+    let suggestions: [ActiveAISuggestion]
+    let onAccept: (ActiveAISuggestion) -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.purple)
+                        .padding(.leading, 12)
+
+                    ForEach(suggestions) { suggestion in
+                        Button {
+                            onAccept(suggestion)
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: suggestion.icon)
+                                    .font(.system(size: 10))
+                                Text(suggestion.prompt)
+                                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(Color.purple.opacity(0.12), in: Capsule())
+                            .foregroundStyle(Color.purple)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 6)
+            }
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+        }
+        .background(Color.purple.opacity(0.05))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.purple.opacity(0.1)).frame(height: 1)
+        }
+    }
+}
+
+// MARK: - Attached Blocks Bar
+
+private struct AttachedBlocksBar: View {
+    let blocks: [TerminalCommandBlock]
+    let onDetach: (UUID) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "paperclip")
+                .font(.system(size: 10))
+                .foregroundStyle(Color.accentColor)
+                .padding(.leading, 12)
+
+            Text("Attached:")
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(blocks) { block in
+                        HStack(spacing: 4) {
+                            Text(block.titleText)
+                                .font(.system(size: 10, design: .monospaced))
+                                .lineLimit(1)
+                                .foregroundStyle(.primary)
+                            Button {
+                                onDetach(block.id)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.accentColor.opacity(0.1), in: Capsule())
+                    }
+                }
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 5)
+        .background(Color.accentColor.opacity(0.05))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.accentColor.opacity(0.1)).frame(height: 1)
+        }
+    }
+}
+
+// MARK: - Suggested Diff Panel
+
+private struct SuggestedDiffPanel: View {
+    let diff: SuggestedDiff
+    let onAccept: () -> Void
+    let onDismiss: () -> Void
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack(spacing: 8) {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.orange)
+                Text("Suggested Fix")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.orange)
+                if let path = diff.filePath {
+                    Text((path as NSString).lastPathComponent)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer()
+                Button(isExpanded ? "Collapse" : "View diff") {
+                    withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 10, design: .rounded))
+                .foregroundStyle(.secondary)
+                Button("Dismiss", action: onDismiss)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(.secondary)
+                Button("Apply") { onAccept() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.mini)
+                    .tint(.orange)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            if isExpanded {
+                Divider().opacity(0.3)
+                if !diff.explanation.isEmpty {
+                    Text(diff.explanation)
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 6)
+                }
+                if diff.isValidPatch {
+                    ScrollView {
+                        Text(diff.patchText)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.primary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                    }
+                    .frame(maxHeight: 180)
+                    .background(Color.black.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+                }
+            }
+        }
+        .background(Color.orange.opacity(0.06))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.orange.opacity(0.15)).frame(height: 1)
         }
     }
 }

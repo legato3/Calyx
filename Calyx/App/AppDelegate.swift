@@ -26,6 +26,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - NSApplicationDelegate
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Register UserDefaults defaults
+        UserDefaults.standard.register(defaults: [
+            AppStorageKeys.activeAIEnabled: true,
+            AppStorageKeys.nextCommandEnabled: true,
+            AppStorageKeys.suggestedDiffsEnabled: true,
+        ])
+
         // Add CLI to PATH for terminals launched within Calyx
         if let binPath = Bundle.main.resourceURL?.appendingPathComponent("bin").path {
             let currentPath = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"

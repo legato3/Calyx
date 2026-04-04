@@ -115,6 +115,8 @@ class Tab: Identifiable {
     var commandBlocks: [TerminalCommandBlock] = []
     /// Per-tab Ollama agent session attached to the Warp-style command bar.
     var ollamaAgentSession: OllamaAgentSession? = nil
+    /// Block IDs explicitly attached to the next agent prompt (Warp-style block attachment).
+    var attachedBlockIDs: Set<UUID> = []
     let registry: SurfaceRegistry
 
     init(
@@ -187,6 +189,23 @@ class Tab: Identifiable {
 
     var latestCommandBlock: TerminalCommandBlock? {
         commandBlocks.first
+    }
+
+    /// Returns the command blocks currently attached to the next agent prompt.
+    var attachedBlocks: [TerminalCommandBlock] {
+        commandBlocks.filter { attachedBlockIDs.contains($0.id) }
+    }
+
+    func attachBlock(_ id: UUID) {
+        attachedBlockIDs.insert(id)
+    }
+
+    func detachBlock(_ id: UUID) {
+        attachedBlockIDs.remove(id)
+    }
+
+    func clearAttachedBlocks() {
+        attachedBlockIDs.removeAll()
     }
 
     @discardableResult

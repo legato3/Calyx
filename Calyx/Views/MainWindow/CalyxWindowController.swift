@@ -36,6 +36,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private var shellErrorMonitors: [UUID: ShellErrorMonitor] = [:]
     // Terminal search indexers keyed by tab ID (always running).
     private var terminalIndexers: [UUID: TerminalIndexer] = [:]
+    // Active AI engines (shared, updated on tab switch).
+    private let activeAIEngine = ActiveAISuggestionEngine()
+    private let nextCommandPredictor = NextCommandPredictor()
+    private let suggestedDiffEngine = SuggestedDiffEngine()
 
     // O(1) surface-to-tab reverse lookup. Rebuilt lazily after any structural change.
     private var surfaceToTab: [UUID: (tab: Tab, group: TabGroup)] = [:]
@@ -121,6 +125,26 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         composeController.onStateChanged = { [weak self] in
             self?.refreshHostingView()
+            self?.syncActiveAIState()
+        }
+        composeController.assistantState.onDraftTextChanged = { [weak self] text in
+            guard let self else { return }
+            // Only predict in shell mode
+            guard self.composeController.assistantState.mode == .shell else {
+                self.nextCommandPredictor.dismiss()
+                self.syncActiveAIState()
+                return
+            }
+            self.nextCommandPredictor.onTextChanged(
+                text,
+                commandHistory: self.activeTab?.commandBlocks ?? [],
+                pwd: self.activeTab?.pwd
+            )
+            // Sync after a short delay to pick up the prediction
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                self?.syncActiveAIState()
+            }
         }
 
         // SplitController callbacks
@@ -725,6 +749,35 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         windowActions.onRouteShellError = { [weak self] tabID in self?.routeShellError(fromTabID: tabID) }
         windowActions.onDismissShellError = { [weak self] tabID in self?.dismissShellError(fromTabID: tabID) }
         windowActions.onJumpToSearchPane = { [weak self] paneID in self?.jumpToSearchPane(paneID: paneID) }
+
+        // Active AI
+        windowActions.onAcceptActiveAISuggestion = { [weak self] suggestion in
+            self?.acceptActiveAISuggestion(suggestion)
+        }
+        windowActions.onDismissActiveAISuggestions = { [weak self] in
+            self?.activeAIEngine.clear()
+            self?.syncActiveAIState()
+        }
+        windowActions.onAcceptSuggestedDiff = { [weak self] diff in
+            self?.applySuggestedDiff(diff)
+        }
+        windowActions.onDismissSuggestedDiff = { [weak self] in
+            self?.suggestedDiffEngine.dismiss()
+            self?.syncActiveAIState()
+        }
+        windowActions.onAcceptNextCommand = { [weak self] in
+            let accepted = self?.nextCommandPredictor.accept()
+            self?.syncActiveAIState()
+            return accepted
+        }
+        windowActions.onAttachBlock = { [weak self] blockID in
+            self?.activeTab?.attachBlock(blockID)
+            self?.syncActiveAIState()
+        }
+        windowActions.onDetachBlock = { [weak self] blockID in
+            self?.activeTab?.detachBlock(blockID)
+            self?.syncActiveAIState()
+        }
     }
 
     private func jumpToSearchPane(paneID: String) {
@@ -1000,7 +1053,12 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func sendComposeText(_ text: String) -> Bool {
-        composeController.send(
+        // Clear Active AI suggestions and attached blocks when user sends
+        activeAIEngine.clear()
+        nextCommandPredictor.dismiss()
+        activeTab?.clearAttachedBlocks()
+        syncActiveAIState()
+        return composeController.send(
             text,
             activeTab: activeTab,
             focusedController: focusedController,
@@ -1060,6 +1118,80 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     private func stopOllamaAgent() {
         composeController.stopAgent(activeTab: activeTab)
+    }
+
+    // MARK: - Active AI
+
+    private func syncActiveAIState() {
+        windowActions.activeAISuggestions = activeAIEngine.suggestions
+        windowActions.nextCommandSuggestion = nextCommandPredictor.suggestion
+        windowActions.suggestedDiffStatus = suggestedDiffEngine.status
+        windowActions.attachedBlockIDs = activeTab?.attachedBlockIDs ?? []
+    }
+
+    private func acceptActiveAISuggestion(_ suggestion: ActiveAISuggestion) {
+        activeAIEngine.clear()
+        // Build prompt, appending any attached block context
+        var prompt = suggestion.prompt
+        if let tab = activeTab, !tab.attachedBlockIDs.isEmpty {
+            let context = tab.attachedBlocks.map { block -> String in
+                let snippet = block.primarySnippet ?? "(no output)"
+                return "[\(block.titleText)]:\n\(snippet)"
+            }.joined(separator: "\n\n")
+            prompt += "\n\nContext from terminal:\n\(context)"
+            tab.clearAttachedBlocks()
+        }
+        // Route to Claude agent
+        let mode = composeController.assistantState.mode
+        if mode == .claudeAgent || mode == .ollamaAgent {
+            _ = composeController.send(
+                prompt,
+                activeTab: activeTab,
+                focusedController: focusedSurfaceController(),
+                sendEnterKey: { [weak self] ctrl in self?.ipcController.onSendEnterKey?(ctrl) }
+            )
+        } else {
+            // Switch to claude agent mode and send
+            composeController.assistantState.mode = .claudeAgent
+            _ = composeController.launchClaudeAgentWorkflow(goal: prompt)
+        }
+        syncActiveAIState()
+    }
+
+    private func applySuggestedDiff(_ diff: SuggestedDiff) {
+        guard diff.isValidPatch, let filePath = diff.filePath else {
+            // No patch — route explanation to agent
+            let message = "Apply this fix: \(diff.explanation)"
+            TerminalControlBridge.shared.routeToNearestAgentPaneOrActive(text: message)
+            suggestedDiffEngine.markApplied()
+            syncActiveAIState()
+            return
+        }
+
+        // Write patch to a temp file and apply with `patch`
+        let tmpURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("calyx_diff_\(UUID().uuidString).patch")
+        do {
+            try diff.patchText.write(to: tmpURL, atomically: true, encoding: .utf8)
+            let pwd = activeTab?.pwd ?? FileManager.default.currentDirectoryPath
+            let command = "patch -p1 < \(tmpURL.path)"
+            TerminalControlBridge.shared.delegate?.runInPane(
+                tabID: activeTab?.id,
+                paneID: nil,
+                text: command,
+                pressEnter: true
+            )
+            suggestedDiffEngine.markApplied()
+        } catch {
+            logger.error("SuggestedDiff: failed to write patch: \(error)")
+        }
+        syncActiveAIState()
+    }
+
+    private func focusedSurfaceController() -> GhosttySurfaceController? {
+        guard let tab = activeTab,
+              let leafID = tab.splitTree.focusedLeafID else { return nil }
+        return tab.registry.controller(for: leafID)
     }
 
     // MARK: - Split Operations
@@ -1351,6 +1483,18 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             for: tab,
             commandBlockID: commandBlockID
         )
+
+        // Active AI: fire engines on the active tab's finished block
+        if tab.id == activeTab?.id, let block = tab.commandBlock(id: commandBlockID) {
+            activeAIEngine.onBlockFinished(block, pwd: tab.pwd)
+            if block.status == .failed {
+                suggestedDiffEngine.onBlockFailed(block, pwd: tab.pwd)
+            } else {
+                suggestedDiffEngine.reset()
+            }
+            syncActiveAIState()
+        }
+
         refreshHostingView()
     }
 

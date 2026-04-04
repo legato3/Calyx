@@ -48,9 +48,16 @@ struct IPCAgentsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                // Warp-style: active agents panel at top when running
+                if agentState.isRunning && !visiblePeers.isEmpty {
+                    activeAgentsPanel
+                }
+
                 serverStatusSection
                 if agentState.isRunning {
-                    peersSection
+                    if visiblePeers.isEmpty {
+                        peersSection
+                    }
                     if !visiblePeers.isEmpty {
                         liveCostSection
                     }
@@ -97,6 +104,41 @@ struct IPCAgentsView: View {
                 onCancel: { showWorkflowSheet = false }
             )
         }
+    }
+
+    // MARK: - Active Agents Panel (Warp-style prominent status)
+
+    private var activeAgentsPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.purple)
+                Text("Active Agents")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                Spacer()
+                Text("\(visiblePeers.filter { AgentStatus.infer(from: $0) == .active }.count) active")
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(.green)
+            }
+
+            VStack(spacing: 4) {
+                ForEach(visiblePeers, id: \.id) { peer in
+                    WarpPeerStatusRow(
+                        peer: peer,
+                        isSelected: peer.id == selectedPeerFilter,
+                        onTap: { selectedPeerFilter = selectedPeerFilter == peer.id ? nil : peer.id },
+                        onNudge: {
+                            _ = TerminalControlBridge.shared.delegate?
+                                .runInPaneMatching(titleContains: peer.name, text: "Continue with the next step.", pressEnter: true)
+                        }
+                    )
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.purple.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.purple.opacity(0.12), lineWidth: 1))
     }
 
     // MARK: - Server Status
@@ -887,6 +929,94 @@ private struct WorkflowTemplateRow: View {
                     .fill(isSelected ? Color.accentColor : Color.primary.opacity(0.06))
             )
             .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Warp-style Peer Status Row
+
+private struct WarpPeerStatusRow: View {
+    let peer: Peer
+    let isSelected: Bool
+    let onTap: () -> Void
+    let onNudge: () -> Void
+
+    @State private var nudgeSent = false
+
+    private var status: AgentStatus { AgentStatus.infer(from: peer) }
+
+    private var statusColor: Color {
+        switch status {
+        case .active: return .green
+        case .idle: return .yellow
+        case .disconnected: return .gray
+        }
+    }
+
+    private var ageLabel: String {
+        let age = Date().timeIntervalSince(peer.lastSeen)
+        if age < 5 { return "just now" }
+        if age < 60 { return "\(Int(age))s ago" }
+        return "\(Int(age / 60))m ago"
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                // Status indicator
+                ZStack {
+                    Circle().fill(statusColor.opacity(0.15)).frame(width: 28, height: 28)
+                    if status == .active {
+                        Circle().fill(statusColor.opacity(0.3)).frame(width: 28, height: 28)
+                            .scaleEffect(nudgeSent ? 1.3 : 1.0)
+                            .animation(.easeOut(duration: 0.6), value: nudgeSent)
+                    }
+                    Circle().fill(statusColor).frame(width: 8, height: 8)
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(peer.name)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text(status.label)
+                            .font(.system(size: 10, design: .rounded))
+                            .foregroundStyle(statusColor)
+                        Text("·")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.quaternary)
+                        Text(ageLabel)
+                            .font(.system(size: 10, design: .rounded))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
+                Spacer()
+
+                // Nudge button
+                Button {
+                    onNudge()
+                    nudgeSent = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { nudgeSent = false }
+                } label: {
+                    Image(systemName: nudgeSent ? "checkmark.circle.fill" : "arrow.forward.circle")
+                        .font(.system(size: 14))
+                        .foregroundStyle(nudgeSent ? Color.green : Color.secondary.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+                .help("Nudge: send \"Continue with the next step.\"")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.white.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.3) : Color.clear, lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
     }

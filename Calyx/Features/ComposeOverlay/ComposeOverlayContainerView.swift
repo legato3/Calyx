@@ -10,6 +10,7 @@ struct ComposeOverlayContainerView: NSViewRepresentable {
     @Binding var text: String
     var onSend: ((String) -> Bool)?
     var onDismiss: (() -> Void)?
+    var onCmdReturn: (() -> Void)?
     var placeholderText: String = "Type here..."
 
     func makeNSView(context: Context) -> ComposeOverlayView {
@@ -20,6 +21,7 @@ struct ComposeOverlayContainerView: NSViewRepresentable {
         }
         view.onSend = onSend
         view.onDismiss = onDismiss
+        view.onCmdReturn = onCmdReturn
         view.placeholderText = placeholderText
         return view
     }
@@ -32,6 +34,7 @@ struct ComposeOverlayContainerView: NSViewRepresentable {
         }
         nsView.onSend = onSend
         nsView.onDismiss = onDismiss
+        nsView.onCmdReturn = onCmdReturn
         nsView.placeholderText = placeholderText
     }
 

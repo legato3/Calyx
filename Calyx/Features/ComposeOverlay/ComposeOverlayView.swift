@@ -40,6 +40,8 @@ class ComposeOverlayView: NSView {
     var onSend: ((String) -> Bool)?
     var onDismiss: (() -> Void)?
     var onTextChange: ((String) -> Void)?
+    /// Called when Cmd+Return is pressed — Warp-style "send to agent" shortcut.
+    var onCmdReturn: (() -> Void)?
     var placeholderText: String = "Type here..." {
         didSet { placeholderLabel.stringValue = placeholderText }
     }
@@ -161,6 +163,12 @@ class ComposeOverlayView: NSView {
         if event.modifierFlags.contains([.command, .shift]),
            event.charactersIgnoringModifiers?.lowercased() == "e" {
             onDismiss?()
+            return true
+        }
+        // Cmd+Return — send to agent (Warp-style ⌘↩)
+        if event.modifierFlags.contains(.command),
+           event.keyCode == 36 {
+            onCmdReturn?()
             return true
         }
         return super.performKeyEquivalent(with: event)

@@ -4,6 +4,8 @@ enum ComposeAssistantMode: String, CaseIterable, Identifiable, Sendable {
     case shell
     case ollamaCommand
     case ollamaAgent
+    /// Claude Code / Codex agent via IPC MCP workflow
+    case claudeAgent
 
     var id: String { rawValue }
 
@@ -12,6 +14,7 @@ enum ComposeAssistantMode: String, CaseIterable, Identifiable, Sendable {
         case .shell: return "Shell"
         case .ollamaCommand: return "Ollama"
         case .ollamaAgent: return "Agent"
+        case .claudeAgent: return "Claude"
         }
     }
 
@@ -22,8 +25,97 @@ enum ComposeAssistantMode: String, CaseIterable, Identifiable, Sendable {
         case .ollamaCommand:
             return "Describe what you want to do..."
         case .ollamaAgent:
-            return "Describe the task you want the local agent to complete..."
+            return "Describe the task for the local agent..."
+        case .claudeAgent:
+            return "Ask Claude to build, fix, or explain something..."
         }
+    }
+
+    /// Whether this mode routes to an AI agent (not raw shell).
+    var isAgentMode: Bool {
+        switch self {
+        case .shell: return false
+        case .ollamaCommand, .ollamaAgent, .claudeAgent: return true
+        }
+    }
+}
+
+// MARK: - Input Intent Detection
+
+/// Classifies a text input as likely shell command or agent prompt.
+enum InputIntent: Equatable {
+    case shell
+    case agent
+    case ambiguous
+
+    var label: String {
+        switch self {
+        case .shell: return "shell"
+        case .agent: return "agent"
+        case .ambiguous: return ""
+        }
+    }
+
+    var color: String {
+        switch self {
+        case .shell: return "green"
+        case .agent: return "purple"
+        case .ambiguous: return "secondary"
+        }
+    }
+}
+
+enum InputIntentDetector {
+    // Patterns that strongly suggest a shell command
+    private static let shellPrefixes: [String] = [
+        "ls", "cd", "pwd", "cat", "echo", "grep", "find", "rm", "mv", "cp",
+        "mkdir", "touch", "chmod", "chown", "sudo", "git", "npm", "yarn",
+        "swift", "xcodebuild", "make", "cargo", "go ", "python", "node",
+        "curl", "wget", "ssh", "scp", "tar", "zip", "unzip", "brew",
+        "docker", "kubectl", "terraform", "aws", "open ", "./", "../",
+        "export ", "source ", "which ", "type ", "env ", "kill ", "ps ",
+    ]
+
+    // Words that strongly suggest a natural language agent prompt
+    private static let agentKeywords: [String] = [
+        "please", "can you", "could you", "help me", "write", "create",
+        "build", "implement", "add", "fix", "refactor", "explain",
+        "what is", "how do", "why does", "show me", "generate",
+        "make a", "make the", "update", "change", "modify", "delete",
+        "debug", "test", "deploy", "analyze", "analyse", "review",
+        "summarize", "summarise", "describe", "list all", "find all",
+        "i want", "i need", "i'd like", "let's", "let me",
+    ]
+
+    static func detect(_ text: String) -> InputIntent {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .ambiguous }
+
+        let lower = trimmed.lowercased()
+
+        // Multi-word or sentence-like → likely agent
+        let wordCount = trimmed.components(separatedBy: .whitespaces).filter { !$0.isEmpty }.count
+        if wordCount >= 6 { return .agent }
+
+        // Starts with a shell prefix → shell
+        for prefix in shellPrefixes {
+            if lower.hasPrefix(prefix) { return .shell }
+        }
+
+        // Contains agent keywords → agent
+        for keyword in agentKeywords {
+            if lower.contains(keyword) { return .agent }
+        }
+
+        // Looks like a path or flag → shell
+        if trimmed.hasPrefix("/") || trimmed.hasPrefix("~") || trimmed.hasPrefix("-") {
+            return .shell
+        }
+
+        // Contains spaces but no shell prefix → lean agent
+        if wordCount >= 3 { return .agent }
+
+        return .ambiguous
     }
 }
 
@@ -151,6 +243,8 @@ final class ComposeAssistantState {
 
     var draftText: String = ""
     var interactions: [ComposeAssistantEntry] = []
+    /// Called whenever draftText changes — used by CalyxWindowController to drive next-command prediction.
+    var onDraftTextChanged: ((String) -> Void)?
 
     init() {
         let raw = UserDefaults.standard.string(forKey: AppStorageKeys.composeAssistantMode) ?? ComposeAssistantMode.shell.rawValue
@@ -159,6 +253,14 @@ final class ComposeAssistantState {
 
     var placeholderText: String { mode.placeholderText }
     var isBusy: Bool { interactions.contains(where: { $0.status == .pending }) }
+
+    /// Auto-detected intent for the current draft text (only meaningful in shell mode).
+    var detectedIntent: InputIntent {
+        guard mode == .shell, !draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .ambiguous
+        }
+        return InputIntentDetector.detect(draftText)
+    }
     var latestRunnableEntry: ComposeAssistantEntry? {
         interactions.first(where: { $0.canRun || $0.canExplain || $0.canFix })
     }
@@ -166,6 +268,7 @@ final class ComposeAssistantState {
     func setDraftText(_ text: String) {
         if draftText != text {
             draftText = text
+            onDraftTextChanged?(text)
         }
     }
 

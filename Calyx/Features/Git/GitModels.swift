@@ -18,6 +18,7 @@ enum SidebarMode: Sendable {
     case testRunner
     case triggers
     case auditLog
+    case agentPermissions
 }
 
 enum GitChangesState: Sendable {

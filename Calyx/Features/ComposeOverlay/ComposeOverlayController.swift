@@ -116,6 +116,11 @@ final class ComposeOverlayController {
                 focusedController: focusedController,
                 sendEnterKey: sendEnterKey
             )
+        case .claudeAgent:
+            // Enrich prompt with any attached blocks
+            let enriched = enrichWithAttachedBlocks(trimmed, activeTab: activeTab)
+            activeTab?.clearAttachedBlocks()
+            return launchClaudeAgentWorkflow(goal: enriched)
         }
     }
 
@@ -727,9 +732,20 @@ final class ComposeOverlayController {
     /// Returns `true` if the command is safe to auto-run without user approval.
     /// Only pure read/inspect commands qualify — anything that writes, deletes, or
     /// has network side-effects must still go through the approval flow.
+    /// Also respects AgentPermissionsStore autonomy levels.
     private func isSafeAutoRunCommand(_ command: String) -> Bool {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty else { return false }
+
+        let permissions = AgentPermissionsStore.shared
+
+        // Check permission profile — if runCommands is alwaysAllow, skip safe-list check
+        if permissions.level(for: .runCommands) == .alwaysAllow { return true }
+        // If runCommands is never or alwaysAsk, always require approval
+        if permissions.isBlocked(.runCommands) { return false }
+        if permissions.level(for: .runCommands) == .alwaysAsk { return false }
+
+        // agentDecides or default: use the safe-command list
         // Never auto-run if it contains destructive patterns.
         let destructive = ["rm ", "rmdir", "sudo", "kill ", "pkill", "chmod", "chown",
                            "git commit", "git push", "git pull", "git merge", "git rebase",
@@ -740,10 +756,17 @@ final class ComposeOverlayController {
         // Block redirects and pipes to mutating commands.
         if trimmed.contains(" > ") || trimmed.contains(" >> ") { return false }
 
+        // Check git operations permission
+        if trimmed.hasPrefix("git ") && permissions.level(for: .gitOperations) == .alwaysAsk { return false }
+
+        // Check network permission
+        let networkPrefixes = ["curl", "wget", "npm", "yarn", "pip", "pip3", "brew"]
+        if networkPrefixes.contains(where: { trimmed.hasPrefix($0) }) {
+            if permissions.level(for: .networkAccess) != .alwaysAllow { return false }
+        }
+
         let firstToken = trimmed.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
-        // Check single-token commands.
         if Self.autoRunPrefixes.contains(firstToken) { return true }
-        // Check two-token commands like "git log", "git status".
         let firstTwo = trimmed.split(whereSeparator: \.isWhitespace).prefix(2).joined(separator: " ")
         if Self.autoRunPrefixes.contains(firstTwo) { return true }
         return false
@@ -784,5 +807,43 @@ final class ComposeOverlayController {
         Output:
         \(snippet)
         """
+    }
+}
+
+// MARK: - Claude Agent Workflow (extension)
+
+extension ComposeOverlayController {
+    /// Launches a Solo Claude Code agent workflow with the given goal as the initial task.
+    func launchClaudeAgentWorkflow(goal: String) -> Bool {
+        guard !goal.isEmpty else { return false }
+        let workflow = AgentWorkflow.templates.first(where: { $0.name == "Solo" })
+            ?? AgentWorkflow.templates[0]
+        var userInfo: [String: Any] = [
+            "roleNames": workflow.roles.map(\.name),
+            "autoStart": true,
+            "sessionName": "",
+            "initialTask": goal,
+        ]
+        AgentRuntimeConfiguration.default.notificationUserInfo.forEach { userInfo[$0.key] = $0.value }
+        NotificationCenter.default.post(
+            name: .calyxIPCLaunchWorkflow,
+            object: nil,
+            userInfo: userInfo
+        )
+        assistantState.draftText = ""
+        return true
+    }
+
+    /// Enriches a prompt with context from any blocks attached to the active tab.
+    func enrichWithAttachedBlocks(_ prompt: String, activeTab: Tab?) -> String {
+        guard let tab = activeTab, !tab.attachedBlockIDs.isEmpty else { return prompt }
+        let blocks = tab.attachedBlocks
+        guard !blocks.isEmpty else { return prompt }
+        let context = blocks.map { block -> String in
+            let status = block.status == .failed ? "failed (exit \(block.exitCode ?? -1))" : "succeeded"
+            let snippet = block.primarySnippet ?? "(no output)"
+            return "Command: \(block.titleText) [\(status)]\nOutput:\n\(snippet)"
+        }.joined(separator: "\n\n---\n\n")
+        return "\(prompt)\n\n<terminal_context>\n\(context)\n</terminal_context>"
     }
 }

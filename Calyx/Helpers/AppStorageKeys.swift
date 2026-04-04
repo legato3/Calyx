@@ -14,4 +14,8 @@ enum AppStorageKeys {
     static let ollamaEndpoint = "ollamaEndpoint"
     static let ollamaModel = "ollamaModel"
     static let composeAssistantMode = "composeAssistantMode"
+    // Active AI features
+    static let activeAIEnabled = "activeAIEnabled"
+    static let nextCommandEnabled = "nextCommandEnabled"
+    static let suggestedDiffsEnabled = "suggestedDiffsEnabled"
 }

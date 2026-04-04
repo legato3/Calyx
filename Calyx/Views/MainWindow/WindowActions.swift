@@ -59,4 +59,24 @@ final class WindowActions {
     /// Reflects `ComposeOverlayController.broadcastEnabled` for the SwiftUI overlay.
     var composeBroadcastEnabled: Bool = false
     var composeAssistantState: ComposeAssistantState?
+    // Active AI
+    /// Accept an Active AI suggestion chip — sends the prompt to the agent.
+    var onAcceptActiveAISuggestion: ((ActiveAISuggestion) -> Void)?
+    /// Dismiss all Active AI suggestions.
+    var onDismissActiveAISuggestions: (() -> Void)?
+    /// Accept the suggested code diff.
+    var onAcceptSuggestedDiff: ((SuggestedDiff) -> Void)?
+    /// Dismiss the suggested code diff.
+    var onDismissSuggestedDiff: (() -> Void)?
+    /// Accept the next-command ghost-text suggestion.
+    var onAcceptNextCommand: (() -> String?)?
+    /// Attach a command block to the current agent prompt.
+    var onAttachBlock: ((UUID) -> Void)?
+    /// Detach a previously attached block.
+    var onDetachBlock: ((UUID) -> Void)?
+    // Active AI state (read by views)
+    var activeAISuggestions: [ActiveAISuggestion] = []
+    var nextCommandSuggestion: String? = nil
+    var suggestedDiffStatus: SuggestedDiffStatus = .idle
+    var attachedBlockIDs: Set<UUID> = []
 }
