@@ -5,6 +5,7 @@
 
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct MainContentView: View {
     @Bindable var windowSession: WindowSession
@@ -54,6 +55,7 @@ struct MainContentView: View {
                         onNewGroup: actions.onNewGroup,
                         onCloseTab: actions.onCloseTab,
                         onGroupRenamed: actions.onGroupRenamed,
+                        onTabRenamed: actions.onTabRenamed,
                         onCollapseToggled: actions.onCollapseToggled,
                         onCloseAllTabsInGroup: actions.onCloseAllTabsInGroup,
                         onWorkingFileSelected: actions.onWorkingFileSelected,
@@ -96,6 +98,7 @@ struct MainContentView: View {
                                     : nil,
                                 onRouteShellError: actions.onRouteShellError,
                                 onDismissShellError: actions.onDismissShellError,
+                                onTabRenamed: actions.onTabRenamed,
                                 activeGroupID: activeGroup?.id
                             )
                         }
@@ -154,6 +157,7 @@ struct MainContentView: View {
                                 .padding(.top, -1)
                                 .padding(.leading, 8)
                                 .glassEffect(.clear.tint(chromeTint), in: .rect)
+                                .onDrop(of: [.fileURL], delegate: TerminalDropDelegate(splitContainerView: splitContainerView))
                                 .layoutPriority(1)
                                 .overlay(alignment: .topTrailing) {
                                     if secureInput.enabled {
@@ -392,5 +396,52 @@ private final class TerminalGlassHostView: NSView {
                 splitContainerView.bottomAnchor.constraint(equalTo: bottomAnchor),
             ])
         }
+    }
+}
+
+// MARK: - Drag and Drop
+
+@MainActor
+struct TerminalDropDelegate: DropDelegate {
+    let splitContainerView: SplitContainerView
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [.fileURL])
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let window = splitContainerView.window,
+              let surfaceView = window.firstResponder as? SurfaceView,
+              let surfaceController = surfaceView.surfaceController else {
+            return false
+        }
+
+        let providers = info.itemProviders(for: [.fileURL])
+        guard !providers.isEmpty else { return false }
+
+        let group = DispatchGroup()
+        var paths: [(Int, String)] = []
+        let lock = NSLock()
+
+        for (i, provider) in providers.enumerated() {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
+                defer { group.leave() }
+                guard let data = data as? Data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
+                let escaped = ShellEscape.escape(url.path)
+                lock.lock()
+                paths.append((i, escaped))
+                lock.unlock()
+            }
+        }
+
+        group.notify(queue: .main) {
+            let joined = paths.sorted { $0.0 < $1.0 }.map(\.1).joined(separator: " ")
+            if !joined.isEmpty {
+                surfaceController.sendText(joined)
+            }
+        }
+        return true
     }
 }

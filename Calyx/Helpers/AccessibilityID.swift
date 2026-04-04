@@ -15,6 +15,7 @@ enum AccessibilityID {
         static func groupCollapseButton(_ id: UUID) -> String { "calyx.sidebar.groupCollapseButton.\(id.uuidString)" }
         static func tabCloseButton(_ id: UUID) -> String { "calyx.sidebar.tab.\(id.uuidString).closeButton" }
         static func groupCloseAllButton(_ id: UUID) -> String { "calyx.sidebar.group.\(id.uuidString).closeAllButton" }
+        static func tabNameTextField(_ id: UUID) -> String { "calyx.sidebar.tabNameTextField.\(id.uuidString)" }
         static func tabAtIndex(_ groupID: UUID, _ index: Int) -> String {
             "calyx.sidebar.group.\(groupID.uuidString).tab.index.\(index)"
         }
@@ -24,6 +25,7 @@ enum AccessibilityID {
         static let newTabButton = "calyx.tabBar.newTabButton"
         static func tab(_ id: UUID) -> String { "calyx.tabBar.tab.\(id.uuidString)" }
         static func tabCloseButton(_ id: UUID) -> String { "calyx.tabBar.tab.\(id.uuidString).closeButton" }
+        static func tabNameTextField(_ id: UUID) -> String { "calyx.tabBar.tabNameTextField.\(id.uuidString)" }
         static func tabAtIndex(_ index: Int) -> String { "calyx.tabBar.tab.index.\(index)" }
     }
     enum CommandPalette {

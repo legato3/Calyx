@@ -694,6 +694,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             composeController.broadcastEnabled.toggle()
             windowActions.composeBroadcastEnabled = composeController.broadcastEnabled
         }
+        windowActions.onTabRenamed = { [weak self] in self?.requestSave() }
         windowActions.onRouteShellError = { [weak self] tabID in self?.routeShellError(fromTabID: tabID) }
         windowActions.onDismissShellError = { [weak self] tabID in self?.dismissShellError(fromTabID: tabID) }
         windowActions.onJumpToSearchPane = { [weak self] paneID in self?.jumpToSearchPane(paneID: paneID) }
@@ -1107,8 +1108,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
            let focusedView = tab.registry.view(for: focusedID),
            focusedView === event.surfaceView,
            tab.title != event.title {
-            window?.title = event.title
             tab.title = event.title
+            window?.title = tab.titleOverride ?? event.title
+            refreshHostingView()
         }
     }
 
@@ -1443,6 +1445,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 return TabSnapshot(
                     id: tab.id,
                     title: tab.title,
+                    titleOverride: tab.titleOverride,
                     pwd: tab.pwd,
                     splitTree: tab.splitTree,
                     browserURL: browserURL
@@ -1575,11 +1578,22 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if let appDelegate = NSApp.delegate as? AppDelegate,
-           appDelegate.closingWouldTerminate(self),
-           !SettingsWindowController.shared.confirmTermination() {
+        guard let appDelegate = NSApp.delegate as? AppDelegate,
+              appDelegate.closingWouldTerminate(self) else {
+            return true
+        }
+
+        // Already confirmed (from Cmd+Q → applicationShouldTerminate)
+        if appDelegate.isTerminationConfirmed {
+            return true
+        }
+
+        // Last-window close via X button: run confirmations
+        if !appDelegate.confirmQuitIfNeeded() {
             return false
         }
+
+        appDelegate.isTerminationConfirmed = true
         return true
     }
 

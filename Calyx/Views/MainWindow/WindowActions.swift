@@ -45,6 +45,7 @@ final class WindowActions {
     var onRouteShellError: ((UUID) -> Void)?
     /// Dismiss (clear) the shell error badge on a tab without routing.
     var onDismissShellError: ((UUID) -> Void)?
+    var onTabRenamed: (() -> Void)?
     /// Jump to the pane whose surface UUID string matches (from terminal search results).
     var onJumpToSearchPane: ((String) -> Void)?
     /// Reflects `ComposeOverlayController.broadcastEnabled` for the SwiftUI overlay.

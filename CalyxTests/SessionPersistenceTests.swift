@@ -638,4 +638,63 @@ final class SessionPersistenceTests: XCTestCase {
         XCTAssertEqual(snapshot.windows[0].sidebarWidth, 200, accuracy: 0.001,
                        "Legacy sidebarWidth of 150 should be clamped to new minimum of 200")
     }
+
+    // MARK: - Tab titleOverride Persistence
+
+    /// TabSnapshot with titleOverride should survive encode-decode roundtrip.
+    func test_tabSnapshot_roundtrip_preserves_titleOverride() throws {
+        let original = TabSnapshot(
+            id: UUID(),
+            title: "Terminal",
+            titleOverride: "Custom Name",
+            pwd: "/tmp",
+            splitTree: SplitTree()
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(TabSnapshot.self, from: data)
+
+        XCTAssertEqual(decoded.titleOverride, "Custom Name",
+                       "titleOverride should survive encode-decode roundtrip")
+    }
+
+    /// Old v4 JSON without titleOverride key should decode with nil titleOverride.
+    func test_v4_json_without_titleOverride_decodes_as_nil() throws {
+        let json = """
+        {"id":"00000000-0000-0000-0000-000000000001","title":"Tab","pwd":"/tmp","splitTree":{"leafID":"00000000-0000-0000-0000-000000000002"}}
+        """
+        let decoded = try JSONDecoder().decode(TabSnapshot.self, from: json.data(using: .utf8)!)
+
+        XCTAssertNil(decoded.titleOverride,
+                     "Old JSON without titleOverride should decode as nil for backward compatibility")
+    }
+
+    /// Tab.snapshot() should include titleOverride in the resulting TabSnapshot.
+    @MainActor
+    func test_tab_snapshot_includes_titleOverride() {
+        let tab = Tab(title: "Terminal")
+        tab.titleOverride = "Server 1"
+
+        let snapshot = tab.snapshot()!
+
+        XCTAssertEqual(snapshot.titleOverride, "Server 1",
+                       "Tab.snapshot() should capture titleOverride")
+    }
+
+    /// Tab(snapshot:) should restore titleOverride from a TabSnapshot.
+    @MainActor
+    func test_tab_from_snapshot_restores_titleOverride() {
+        let snapshot = TabSnapshot(
+            id: UUID(),
+            title: "Terminal",
+            titleOverride: "My Tab",
+            pwd: nil,
+            splitTree: SplitTree()
+        )
+
+        let tab = Tab(snapshot: snapshot)
+
+        XCTAssertEqual(tab.titleOverride, "My Tab",
+                       "Tab(snapshot:) should restore titleOverride from the snapshot")
+    }
 }

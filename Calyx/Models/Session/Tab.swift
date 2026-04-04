@@ -15,6 +15,7 @@ enum TabContent: Sendable {
 class Tab: Identifiable {
     let id: UUID
     var title: String
+    var titleOverride: String?
     var pwd: String?
     var splitTree: SplitTree
     var content: TabContent
@@ -35,6 +36,7 @@ class Tab: Identifiable {
     init(
         id: UUID = UUID(),
         title: String = "Terminal",
+        titleOverride: String? = nil,
         pwd: String? = nil,
         splitTree: SplitTree = SplitTree(),
         content: TabContent = .terminal,
@@ -42,6 +44,7 @@ class Tab: Identifiable {
     ) {
         self.id = id
         self.title = title
+        self.titleOverride = titleOverride
         self.pwd = pwd
         self.splitTree = splitTree
         self.content = content

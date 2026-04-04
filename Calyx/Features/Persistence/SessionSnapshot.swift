@@ -140,13 +140,15 @@ struct TabGroupSnapshot: Codable, Equatable {
 struct TabSnapshot: Codable, Equatable {
     let id: UUID
     let title: String
+    let titleOverride: String?
     let pwd: String?
     let splitTree: SplitTree
     let browserURL: URL?
 
-    init(id: UUID = UUID(), title: String = "Terminal", pwd: String? = nil, splitTree: SplitTree = SplitTree(), browserURL: URL? = nil) {
+    init(id: UUID = UUID(), title: String = "Terminal", titleOverride: String? = nil, pwd: String? = nil, splitTree: SplitTree = SplitTree(), browserURL: URL? = nil) {
         self.id = id
         self.title = title
+        self.titleOverride = titleOverride
         self.pwd = pwd
         self.splitTree = splitTree
         self.browserURL = browserURL
@@ -195,9 +197,9 @@ extension Tab {
         case .diff:
             return nil  // Diff tabs are not persisted
         case .terminal:
-            return TabSnapshot(id: id, title: title, pwd: pwd, splitTree: splitTree, browserURL: nil)
+            return TabSnapshot(id: id, title: title, titleOverride: titleOverride, pwd: pwd, splitTree: splitTree, browserURL: nil)
         case .browser(let url):
-            return TabSnapshot(id: id, title: title, pwd: pwd, splitTree: splitTree, browserURL: url)
+            return TabSnapshot(id: id, title: title, titleOverride: titleOverride, pwd: pwd, splitTree: splitTree, browserURL: url)
         }
     }
 
@@ -210,6 +212,7 @@ extension Tab {
         self.init(
             id: snapshot.id,
             title: snapshot.title,
+            titleOverride: snapshot.titleOverride,
             pwd: snapshot.pwd,
             splitTree: snapshot.splitTree,
             content: content

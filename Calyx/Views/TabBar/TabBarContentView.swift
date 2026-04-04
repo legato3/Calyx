@@ -14,6 +14,7 @@ struct TabBarContentView: View {
     var onMoveTab: ((Int, Int) -> Void)?
     var onRouteShellError: ((UUID) -> Void)?
     var onDismissShellError: ((UUID) -> Void)?
+    var onTabRenamed: (() -> Void)?
     var activeGroupID: UUID? = nil
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -357,7 +358,8 @@ extension TabBarContentView {
             onSelected: { onTabSelected?(tab.id) },
             onClose: { onCloseTab?(tab.id) },
             onRouteShellError: onRouteShellError.map { f in { f(tab.id) } },
-            onDismissShellError: onDismissShellError.map { f in { f(tab.id) } }
+            onDismissShellError: onDismissShellError.map { f in { f(tab.id) } },
+            onTabRenamed: onTabRenamed
         )
     }
 }
@@ -369,26 +371,49 @@ private struct TabItemButton: View {
     var onClose: (() -> Void)?
     var onRouteShellError: (() -> Void)?
     var onDismissShellError: (() -> Void)?
+    var onTabRenamed: (() -> Void)?
     @State private var isHovering = false
+    @State private var isEditing = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        HStack(spacing: 6) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(tab.title.isEmpty ? fallbackTitle : tab.title)
-                    .lineLimit(1)
-                    .font(.system(size: 12.5, weight: isActive ? .semibold : .medium, design: .rounded))
-                    .tracking(0.18)
-                    .foregroundStyle(isActive ? .primary : .secondary)
+        let visibleTitle = tab.titleOverride ?? tab.title
 
-                if let pwd = tab.pwd {
-                    Text(shortenedPwd(pwd))
+        HStack(spacing: 6) {
+            if isEditing {
+                InlineTextField(
+                    initialText: visibleTitle.isEmpty ? fallbackTitle : visibleTitle,
+                    accessibilityID: AccessibilityID.TabBar.tabNameTextField(tab.id),
+                    fontSize: 12.5,
+                    fontWeight: isActive ? .semibold : .medium,
+                    onCommit: { text in
+                        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        tab.titleOverride = trimmed.isEmpty ? nil : trimmed
+                        isEditing = false
+                        onTabRenamed?()
+                    },
+                    onCancel: {
+                        isEditing = false
+                    }
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(visibleTitle.isEmpty ? fallbackTitle : visibleTitle)
                         .lineLimit(1)
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 12.5, weight: isActive ? .semibold : .medium, design: .rounded))
+                        .tracking(0.18)
+                        .foregroundStyle(isActive ? .primary : .secondary)
+
+                    if let pwd = tab.pwd {
+                        Text(shortenedPwd(pwd))
+                            .lineLimit(1)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
             if tab.autoAcceptEnabled {
                 Text("⚡")
@@ -443,15 +468,17 @@ private struct TabItemButton: View {
                     .frame(width: 16, height: 16)
             }
             .buttonStyle(.plain)
+            .closeButtonHoverHighlight(size: 16, isVisible: (isHovering || isActive) && !isEditing)
             .opacity(isHovering || isActive ? 1 : 0)
-            .allowsHitTesting(isHovering || isActive)
+            .allowsHitTesting((isHovering || isActive) && !isEditing)
             .accessibilityIdentifier(AccessibilityID.TabBar.tabCloseButton(tab.id))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 4)
         .frame(minWidth: 72, maxWidth: 180)
         .contentShape(Rectangle())
-        .onTapGesture { onSelected?() }
+        .onTapGesture { if !isEditing { onSelected?() } }
+        .highPriorityGesture(TapGesture(count: 2).onEnded { if !isEditing { isEditing = true } })
         .modifier(TabChromeModifier(
             isActive: isActive,
             cornerRadius: 8,
@@ -459,7 +486,7 @@ private struct TabItemButton: View {
         ))
         .onHover { isHovering = $0 }
         .accessibilityIdentifier(AccessibilityID.TabBar.tab(tab.id))
-        .accessibilityLabel(tab.title)
+        .accessibilityLabel(visibleTitle.isEmpty ? fallbackTitle : visibleTitle)
     }
 
     private var fallbackTitle: String {

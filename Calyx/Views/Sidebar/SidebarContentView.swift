@@ -20,6 +20,7 @@ struct SidebarContentView: View {
     var onNewGroup: (() -> Void)?
     var onCloseTab: ((UUID) -> Void)?
     var onGroupRenamed: (() -> Void)?
+    var onTabRenamed: (() -> Void)?
     var onCollapseToggled: (() -> Void)?
     var onCloseAllTabsInGroup: ((UUID) -> Void)?
     var onWorkingFileSelected: ((GitFileEntry) -> Void)?
@@ -107,6 +108,7 @@ struct SidebarContentView: View {
                                     onTabSelected: onTabSelected,
                                     onCloseTab: onCloseTab,
                                     onGroupRenamed: onGroupRenamed,
+                                    onTabRenamed: onTabRenamed,
                                     onCollapseToggled: onCollapseToggled,
                                     onCloseAllTabsInGroup: onCloseAllTabsInGroup,
                                     onMoveTab: onMoveTab
@@ -388,6 +390,7 @@ private struct GroupSectionView: View {
     var onTabSelected: ((UUID) -> Void)?
     var onCloseTab: ((UUID) -> Void)?
     var onGroupRenamed: (() -> Void)?
+    var onTabRenamed: (() -> Void)?
     var onCollapseToggled: (() -> Void)?
     var onCloseAllTabsInGroup: ((UUID) -> Void)?
     var onMoveTab: ((UUID, Int, Int) -> Void)?
@@ -404,9 +407,11 @@ private struct GroupSectionView: View {
                     Circle()
                         .fill(Color(nsColor: group.color.nsColor))
                         .frame(width: 8, height: 8)
-                    GroupNameTextField(
+                    InlineTextField(
                         initialText: group.name,
                         accessibilityID: AccessibilityID.Sidebar.groupNameTextField(group.id),
+                        fontSize: 12,
+                        fontWeight: .semibold,
                         onCommit: { text in
                             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                             if !trimmed.isEmpty {
@@ -461,6 +466,8 @@ private struct GroupSectionView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .allowsHitTesting(isHoveringHeader)
+                    .closeButtonHoverHighlight(size: 20, isVisible: isHoveringHeader, hoverOpacity: 0.08)
                     .accessibilityIdentifier(AccessibilityID.Sidebar.groupCloseAllButton(group.id))
 
                     // Right: collapse toggle button
@@ -502,7 +509,8 @@ private struct GroupSectionView: View {
                             tab: tab,
                             isActive: tab.id == activeTabID && isActiveGroup,
                             onSelected: { onTabSelected?(tab.id) },
-                            onClose: { onCloseTab?(tab.id) }
+                            onClose: { onCloseTab?(tab.id) },
+                            onTabRenamed: onTabRenamed
                         )
                         .background(
                             GeometryReader { geo in
@@ -644,7 +652,9 @@ private struct TabRowItemView: View {
     let isActive: Bool
     var onSelected: (() -> Void)?
     var onClose: (() -> Void)?
+    var onTabRenamed: (() -> Void)?
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @State private var isEditing = false
     @State private var isHovering = false
     @State private var claudePulse = false
 
@@ -656,32 +666,56 @@ private struct TabRowItemView: View {
         }
     }
 
+    private var visibleTitle: String {
+        tab.titleOverride ?? tab.title
+    }
+
     var body: some View {
+        let displayText = visibleTitle.isEmpty ? fallbackTitle : visibleTitle
+
         HStack(spacing: 4) {
             Image(systemName: tabIcon)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if tab.title.lowercased().contains("claude") {
-                Circle()
-                    .fill(Color.accentColor)
-                    .frame(width: 5, height: 5)
-                    .opacity(claudePulse ? 1.0 : 0.3)
-                    .onAppear {
-                        withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) {
-                            claudePulse = true
-                        }
+            if isEditing {
+                InlineTextField(
+                    initialText: displayText,
+                    accessibilityID: AccessibilityID.Sidebar.tabNameTextField(tab.id),
+                    fontSize: 12.5,
+                    fontWeight: isActive ? .semibold : .medium,
+                    onCommit: { text in
+                        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        tab.titleOverride = trimmed.isEmpty ? nil : trimmed
+                        isEditing = false
+                        onTabRenamed?()
+                    },
+                    onCancel: {
+                        isEditing = false
                     }
-                    .onDisappear { claudePulse = false }
-                    .help("Claude Code is running in this tab")
+                )
+            } else {
+                if visibleTitle.lowercased().contains("claude") {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 5, height: 5)
+                        .opacity(claudePulse ? 1.0 : 0.3)
+                        .onAppear {
+                            withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) {
+                                claudePulse = true
+                            }
+                        }
+                        .onDisappear { claudePulse = false }
+                        .help("Claude Code is running in this tab")
+                }
+                if tab.autoAcceptEnabled {
+                    Text("⚡")
+                        .font(.system(size: 9))
+                        .help("Auto-accept active")
+                }
+                Text(displayText)
+                    .lineLimit(1)
+                    .font(.system(size: 12.5, weight: isActive ? .semibold : .medium, design: .rounded))
             }
-            if tab.autoAcceptEnabled {
-                Text("⚡")
-                    .font(.system(size: 9))
-                    .help("Auto-accept active")
-            }
-            Text(tab.title.isEmpty ? fallbackTitle : tab.title)
-                .lineLimit(1)
-                .font(.system(size: 12.5, weight: isActive ? .semibold : .medium, design: .rounded))
             Spacer()
             if tab.unreadNotifications > 0 {
                 Text(tab.unreadNotifications > 99 ? "99+" : "\(tab.unreadNotifications)")
@@ -699,6 +733,8 @@ private struct TabRowItemView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .closeButtonHoverHighlight(size: 16, isVisible: (isHovering || isActive) && !isEditing)
+            .allowsHitTesting((isHovering || isActive) && !isEditing)
             .accessibilityIdentifier(AccessibilityID.Sidebar.tabCloseButton(tab.id))
         }
         .contentShape(Rectangle())
@@ -709,7 +745,8 @@ private struct TabRowItemView: View {
             cornerRadius: 12,
             reduceTransparency: reduceTransparency
         ))
-        .onTapGesture { onSelected?() }
+        .onTapGesture { if !isEditing { onSelected?() } }
+        .highPriorityGesture(TapGesture(count: 2).onEnded { if !isEditing { isEditing = true } })
         .onAssumeInsideHover($isHovering)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.Sidebar.tab(tab.id))

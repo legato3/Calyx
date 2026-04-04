@@ -752,4 +752,55 @@ final class SessionModelTests: XCTestCase {
         let group = makeGroup()
         XCTAssertFalse(group.isCollapsed)
     }
+
+    // ==================== Tab titleOverride ====================
+
+    func test_should_have_nil_titleOverride_by_default() {
+        // Arrange & Act
+        let tab = makeTab(title: "Terminal")
+
+        // Assert
+        XCTAssertNil(tab.titleOverride,
+                     "titleOverride should be nil by default")
+    }
+
+    func test_should_return_override_when_titleOverride_set() {
+        // Arrange
+        let tab = makeTab(title: "Terminal")
+
+        // Act
+        tab.titleOverride = "My Custom Tab"
+
+        // Assert
+        XCTAssertEqual(tab.titleOverride, "My Custom Tab",
+                       "titleOverride should return the value that was set")
+    }
+
+    func test_should_clear_titleOverride_when_set_to_nil() {
+        // Arrange
+        let tab = makeTab(title: "Terminal")
+        tab.titleOverride = "Custom"
+
+        // Act
+        tab.titleOverride = nil
+
+        // Assert
+        XCTAssertNil(tab.titleOverride,
+                     "titleOverride should be nil after being cleared")
+    }
+
+    func test_should_preserve_titleOverride_when_terminal_title_updates() {
+        // Arrange
+        let tab = makeTab(title: "Terminal")
+        tab.titleOverride = "My Server"
+
+        // Act
+        tab.title = "user@host:~$"
+
+        // Assert
+        XCTAssertEqual(tab.titleOverride, "My Server",
+                       "titleOverride should not be affected by terminal title changes")
+        XCTAssertEqual(tab.title, "user@host:~$",
+                       "title should reflect the terminal title update")
+    }
 }
