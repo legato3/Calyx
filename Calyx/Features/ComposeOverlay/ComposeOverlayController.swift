@@ -20,7 +20,7 @@ private let shellPromptSuffixes: [String] = [
 
 @MainActor
 final class ComposeOverlayController {
-    private static let maxAgentIterations = 6
+    private static let maxAgentIterations = 8
 
     let assistantState = ComposeAssistantState()
     var onStateChanged: (() -> Void)?
@@ -33,6 +33,27 @@ final class ComposeOverlayController {
     /// instead of only the targeted surface.
     var broadcastEnabled: Bool = false
     private var agentTasks: [UUID: Task<Void, Never>] = [:]
+
+    /// Retained for the duration of an agent run so safe commands can be auto-dispatched.
+    private weak var agentTargetController: GhosttySurfaceController?
+    private var agentSendEnterKey: ((GhosttySurfaceController) -> Void)?
+
+    // Shell commands that are safe to run without user approval in agent mode.
+    // Must be read-only or purely observational — no writes, no deletes, no network side-effects.
+    private static let autoRunPrefixes: Set<String> = [
+        "ls", "ll", "cat", "pwd", "echo", "which", "type",
+        "head", "tail", "wc", "diff", "file",
+        "git log", "git status", "git branch", "git diff",
+        "git show", "git stash list", "git remote",
+        "find", "rg", "grep", "awk", "sed", "sort", "uniq", "cut",
+        "env", "printenv", "date", "uname", "whoami", "df", "du", "ps",
+        "swift --version", "swiftc --version",
+        "node --version", "npm --version", "npx --version",
+        "cargo --version", "rustc --version",
+        "python --version", "python3 --version",
+        "go version", "ruby --version",
+        "xcodebuild -version",
+    ]
 
     // MARK: - Overlay Lifecycle
 
@@ -374,11 +395,14 @@ final class ComposeOverlayController {
     private func startAgent(
         goal: String,
         activeTab: Tab?,
-        focusedController _: GhosttySurfaceController?,
-        sendEnterKey _: @escaping (GhosttySurfaceController) -> Void
+        focusedController: GhosttySurfaceController?,
+        sendEnterKey: @escaping (GhosttySurfaceController) -> Void
     ) -> Bool {
         guard let activeTab else { return false }
         cancelAgentTask(for: activeTab.id)
+        // Store for auto-dispatch of safe commands.
+        agentTargetController = focusedController
+        agentSendEnterKey = sendEnterKey
         activeTab.startOllamaAgent(goal: goal)
         assistantState.setDraftText("")
         onStateChanged?()
@@ -438,7 +462,23 @@ final class ComposeOverlayController {
                         activeTab.failOllamaAgent("Ollama returned a run action without a command.")
                         return
                     }
-                    activeTab.setOllamaAgentAwaitingApproval(command: command, message: decision.message)
+                    // Auto-run if the command is safe and we still have a controller reference.
+                    if self.isSafeAutoRunCommand(command),
+                       let controller = self.agentTargetController,
+                       let sendEnterKey = self.agentSendEnterKey {
+                        activeTab.setOllamaAgentAwaitingApproval(command: command, message: "↪ Auto-running: \(decision.message)")
+                        let blockID = self.dispatchShellCommand(
+                            command,
+                            entryID: nil,
+                            source: .assistant,
+                            activeTab: activeTab,
+                            focusedController: controller,
+                            sendEnterKey: sendEnterKey
+                        )
+                        activeTab.markOllamaAgentRunning(blockID: blockID)
+                    } else {
+                        activeTab.setOllamaAgentAwaitingApproval(command: command, message: decision.message)
+                    }
                 case .done:
                     activeTab.completeOllamaAgent(summary: decision.message)
                 }
@@ -622,15 +662,27 @@ final class ComposeOverlayController {
                 )
                 guard let snippet else { continue }
                 if self.isPromptReady(snippet) {
+                    let exitCode = activeTab.lastShellError == nil ? 0 : 1
+                    let errorSnippet = activeTab.lastShellError?.snippet
                     _ = activeTab.finishCommandBlock(
                         id: blockID,
                         surfaceID: surfaceID,
                         fallbackCommand: block.command,
-                        exitCode: activeTab.lastShellError == nil ? 0 : 1,
+                        exitCode: exitCode,
                         durationNanoseconds: nil,
                         outputSnippet: snippet,
-                        errorSnippet: activeTab.lastShellError?.snippet
+                        errorSnippet: errorSnippet
                     )
+                    // Auto-suggest a fix when a user shell command fails with output.
+                    if exitCode != 0,
+                       block.source == .shell,
+                       errorSnippet != nil || !snippet.isEmpty {
+                        self.fixCommandBlock(
+                            id: blockID,
+                            activeTab: activeTab,
+                            focusedController: focusedController
+                        )
+                    }
                     return
                 }
             }
@@ -670,6 +722,31 @@ final class ComposeOverlayController {
 
     private func cancelAgentTask(for tabID: UUID) {
         agentTasks.removeValue(forKey: tabID)?.cancel()
+    }
+
+    /// Returns `true` if the command is safe to auto-run without user approval.
+    /// Only pure read/inspect commands qualify — anything that writes, deletes, or
+    /// has network side-effects must still go through the approval flow.
+    private func isSafeAutoRunCommand(_ command: String) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return false }
+        // Never auto-run if it contains destructive patterns.
+        let destructive = ["rm ", "rmdir", "sudo", "kill ", "pkill", "chmod", "chown",
+                           "git commit", "git push", "git pull", "git merge", "git rebase",
+                           "git reset", "git checkout ", "git switch", "git stash pop",
+                           "npm install", "npm run", "cargo build", "cargo run",
+                           "xcodebuild build", "make ", "brew install", "brew upgrade"]
+        if destructive.contains(where: { trimmed.contains($0) }) { return false }
+        // Block redirects and pipes to mutating commands.
+        if trimmed.contains(" > ") || trimmed.contains(" >> ") { return false }
+
+        let firstToken = trimmed.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
+        // Check single-token commands.
+        if Self.autoRunPrefixes.contains(firstToken) { return true }
+        // Check two-token commands like "git log", "git status".
+        let firstTwo = trimmed.split(whereSeparator: \.isWhitespace).prefix(2).joined(separator: " ")
+        if Self.autoRunPrefixes.contains(firstTwo) { return true }
+        return false
     }
 
     private func agentRecentCommandContext(for activeTab: Tab) -> String {

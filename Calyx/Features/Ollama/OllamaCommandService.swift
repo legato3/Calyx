@@ -434,8 +434,8 @@ enum OllamaCommandService {
     }
 
     static func generateCommand(for request: String, pwd: String?) async throws -> String {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let prompt = buildCommandPrompt(request: request, pwd: pwd, shell: shell)
+        let context = await TerminalContextGatherer.gather(pwd: pwd)
+        let prompt = buildCommandPrompt(request: request, context: context)
         return try await sendPrompt(prompt, temperature: 0.15)
     }
 
@@ -444,14 +444,14 @@ enum OllamaCommandService {
         pwd: String?,
         onPartial: @escaping @MainActor @Sendable (String) -> Void
     ) async throws -> String {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let prompt = buildCommandPrompt(request: request, pwd: pwd, shell: shell)
+        let context = await TerminalContextGatherer.gather(pwd: pwd)
+        let prompt = buildCommandPrompt(request: request, context: context)
         return try await streamPrompt(prompt, temperature: 0.15, onPartial: onPartial)
     }
 
     static func explainCommandOutput(command: String?, output: String, pwd: String?) async throws -> String {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let prompt = buildExplainPrompt(command: command, output: output, pwd: pwd, shell: shell)
+        let context = await TerminalContextGatherer.gather(pwd: pwd)
+        let prompt = buildExplainPrompt(command: command, output: output, context: context)
         return try await sendPrompt(prompt, temperature: 0.2)
     }
 
@@ -461,14 +461,14 @@ enum OllamaCommandService {
         pwd: String?,
         onPartial: @escaping @MainActor @Sendable (String) -> Void
     ) async throws -> String {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let prompt = buildExplainPrompt(command: command, output: output, pwd: pwd, shell: shell)
+        let context = await TerminalContextGatherer.gather(pwd: pwd)
+        let prompt = buildExplainPrompt(command: command, output: output, context: context)
         return try await streamPrompt(prompt, temperature: 0.2, onPartial: onPartial)
     }
 
     static func suggestFix(command: String?, output: String, pwd: String?) async throws -> String {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let prompt = buildFixPrompt(command: command, output: output, pwd: pwd, shell: shell)
+        let context = await TerminalContextGatherer.gather(pwd: pwd)
+        let prompt = buildFixPrompt(command: command, output: output, context: context)
         return try await sendPrompt(prompt, temperature: 0.15)
     }
 
@@ -478,8 +478,8 @@ enum OllamaCommandService {
         pwd: String?,
         onPartial: @escaping @MainActor @Sendable (String) -> Void
     ) async throws -> String {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let prompt = buildFixPrompt(command: command, output: output, pwd: pwd, shell: shell)
+        let context = await TerminalContextGatherer.gather(pwd: pwd)
+        let prompt = buildFixPrompt(command: command, output: output, context: context)
         return try await streamPrompt(prompt, temperature: 0.15, onPartial: onPartial)
     }
 
@@ -490,11 +490,10 @@ enum OllamaCommandService {
         priorAgentContext: String,
         onPartial: @escaping @MainActor @Sendable (String) -> Void
     ) async throws -> OllamaAgentDecision {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let context = await TerminalContextGatherer.gather(pwd: pwd)
         let prompt = buildAgentPrompt(
             goal: goal,
-            pwd: pwd,
-            shell: shell,
+            context: context,
             recentCommandContext: recentCommandContext,
             priorAgentContext: priorAgentContext
         )
@@ -643,8 +642,7 @@ enum OllamaCommandService {
         return (data, response)
     }
 
-    private static func buildCommandPrompt(request: String, pwd: String?, shell: String) -> String {
-        let cwd = pwd ?? "(unknown)"
+    private static func buildCommandPrompt(request: String, context: TerminalContext) -> String {
         return """
         You are Calyx, a terminal command assistant embedded in a macOS terminal app.
 
@@ -658,16 +656,14 @@ enum OllamaCommandService {
         - If a command would be unsafe, ambiguous, or the request is not really a shell command task, respond with a brief plain-English sentence prefixed by NOTE:
 
         Context:
-        - Current working directory: \(cwd)
-        - Shell: \(shell)
+        \(context.contextBlock)
 
         User request:
         \(request)
         """
     }
 
-    private static func buildExplainPrompt(command: String?, output: String, pwd: String?, shell: String) -> String {
-        let cwd = pwd ?? "(unknown)"
+    private static func buildExplainPrompt(command: String?, output: String, context: TerminalContext) -> String {
         let commandText = command?.isEmpty == false ? command! : "(unknown command)"
         return """
         You are Calyx, a terminal assistant embedded in a macOS terminal app.
@@ -682,8 +678,7 @@ enum OllamaCommandService {
         - Do not use markdown fences.
 
         Context:
-        - Current working directory: \(cwd)
-        - Shell: \(shell)
+        \(context.contextBlock)
         - Command: \(commandText)
 
         Terminal output:
@@ -691,8 +686,7 @@ enum OllamaCommandService {
         """
     }
 
-    private static func buildFixPrompt(command: String?, output: String, pwd: String?, shell: String) -> String {
-        let cwd = pwd ?? "(unknown)"
+    private static func buildFixPrompt(command: String?, output: String, context: TerminalContext) -> String {
         let commandText = command?.isEmpty == false ? command! : "(unknown command)"
         return """
         You are Calyx, a terminal command assistant embedded in a macOS terminal app.
@@ -707,8 +701,7 @@ enum OllamaCommandService {
         - If the output is ambiguous or a command would be unsafe, respond with a brief plain-English sentence prefixed by NOTE:
 
         Context:
-        - Current working directory: \(cwd)
-        - Shell: \(shell)
+        \(context.contextBlock)
         - Original command: \(commandText)
 
         Failure output:
@@ -718,12 +711,10 @@ enum OllamaCommandService {
 
     private static func buildAgentPrompt(
         goal: String,
-        pwd: String?,
-        shell: String,
+        context: TerminalContext,
         recentCommandContext: String,
         priorAgentContext: String
     ) -> String {
-        let cwd = pwd ?? "(unknown)"
         return """
         You are Calyx Agent, a local terminal agent embedded in a macOS terminal app.
 
@@ -746,8 +737,7 @@ enum OllamaCommandService {
         - Do not use markdown fences or bullet lists.
 
         Context:
-        - Current working directory: \(cwd)
-        - Shell: \(shell)
+        \(context.contextBlock)
         - Goal: \(goal)
 
         Recent command history:

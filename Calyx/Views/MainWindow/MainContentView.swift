@@ -193,6 +193,7 @@ struct MainContentView: View {
                                             ollamaEndpoint: ollamaEndpoint,
                                             broadcastEnabled: actions.composeBroadcastEnabled,
                                             isExpanded: windowSession.showComposeOverlay,
+                                            pwd: activeTab?.pwd,
                                             onToggleExpanded: { actions.onToggleComposeOverlay?() },
                                             onToggleBroadcast: { actions.onToggleComposeBroadcast?() },
                                             onSend: actions.onComposeOverlaySend,
@@ -358,6 +359,7 @@ private struct ComposeCommandBarView: View {
     let ollamaEndpoint: String
     let broadcastEnabled: Bool
     let isExpanded: Bool
+    let pwd: String?
     let onToggleExpanded: () -> Void
     let onToggleBroadcast: () -> Void
     let onSend: ((String) -> Bool)?
@@ -369,6 +371,8 @@ private struct ComposeCommandBarView: View {
     let onFixCommandBlock: ((UUID) -> Void)?
     let onApproveAgent: (() -> Bool)?
     let onStopAgent: (() -> Void)?
+
+    @State private var gitBranch: String? = nil
 
     private var visibleCommandBlocks: [TerminalCommandBlock] {
         Array(commandBlocks.prefix(isExpanded ? 6 : 1))
@@ -428,6 +432,12 @@ private struct ComposeCommandBarView: View {
         .padding(.horizontal, 12)
         .padding(.top, 10)
         .padding(.bottom, 12)
+        .task(id: pwd) {
+            guard let pwd else { gitBranch = nil; return }
+            gitBranch = await TerminalContextGatherer.runTool(
+                "git", args: ["branch", "--show-current"], cwd: pwd, timeout: 2
+            )
+        }
     }
 
     private var header: some View {
@@ -446,6 +456,19 @@ private struct ComposeCommandBarView: View {
             .pickerStyle(.segmented)
             .frame(width: 250)
 
+            if let branch = gitBranch {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 9))
+                    Text(branch)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(.secondary.opacity(0.12), in: Capsule())
+                .foregroundStyle(.secondary)
+            }
+
             if isOllamaMode {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(ollamaModel.isEmpty ? OllamaCommandService.defaultModel : ollamaModel)
@@ -456,10 +479,6 @@ private struct ComposeCommandBarView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-            } else {
-                Text("Warp-style command bar")
-                    .font(.system(size: 11, design: .rounded))
-                    .foregroundStyle(.secondary)
             }
 
             if isThinking {
