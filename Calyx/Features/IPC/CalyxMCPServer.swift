@@ -784,7 +784,7 @@ final class CalyxMCPServer {
                 "tab_id": event.tabID.uuidString,
                 "tab_title": event.tabTitle,
                 "snippet": event.snippet,
-                "timestamp": ISO8601DateFormatter().string(from: event.timestamp),
+                "timestamp": Self.iso8601.string(from: event.timestamp),
             ]
         } else {
             result = ["found": false]
@@ -822,7 +822,7 @@ final class CalyxMCPServer {
             "stored": true,
             "key": entry.key,
             "project_key": projectKey,
-            "expires_at": entry.expiresAt.map { ISO8601DateFormatter().string(from: $0) } as Any,
+            "expires_at": entry.expiresAt.map { Self.iso8601.string(from: $0) } as Any,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: result),
               let text = String(data: data, encoding: .utf8) else {
@@ -845,7 +845,7 @@ final class CalyxMCPServer {
         }
         let list = entries.map { e -> [String: Any] in
             var item: [String: Any] = ["key": e.key, "value": e.value, "age": e.age]
-            if let exp = e.expiresAt { item["expires_at"] = ISO8601DateFormatter().string(from: exp) }
+            if let exp = e.expiresAt { item["expires_at"] = Self.iso8601.string(from: exp) }
             return item
         }
         let result: [String: Any] = ["project_key": projectKey, "count": list.count, "memories": list]
@@ -887,8 +887,8 @@ final class CalyxMCPServer {
             entries = entries.filter { $0.key.hasPrefix(prefix) }
         }
         let list = entries.map { e -> [String: Any] in
-            var item: [String: Any] = ["key": e.key, "value": e.value, "age": e.age, "updated_at": ISO8601DateFormatter().string(from: e.updatedAt)]
-            if let exp = e.expiresAt { item["expires_at"] = ISO8601DateFormatter().string(from: exp) }
+            var item: [String: Any] = ["key": e.key, "value": e.value, "age": e.age, "updated_at": Self.iso8601.string(from: e.updatedAt)]
+            if let exp = e.expiresAt { item["expires_at"] = Self.iso8601.string(from: exp) }
             return item
         }
         let result: [String: Any] = ["project_key": projectKey, "count": list.count, "memories": list]
@@ -950,7 +950,7 @@ final class CalyxMCPServer {
             [
                 "pane_id":    r.paneID,
                 "pane_title": r.paneTitle,
-                "timestamp":  ISO8601DateFormatter().string(from: r.timestamp),
+                "timestamp":  Self.iso8601.string(from: r.timestamp),
                 "line":       r.line
             ]
         }
@@ -1080,11 +1080,11 @@ final class CalyxMCPServer {
         let command = arguments?["command"]?.stringValue
         let workDir = arguments?["work_dir"]?.stringValue
 
-        DispatchQueue.main.async {
-            let store = TestRunnerStore.shared
-            if let wd = workDir { store.workDir = wd }
-            store.run(command: command)
-        }
+        // CalyxMCPServer is @MainActor — mutate TestRunnerStore directly without
+        // re-dispatching to main, which would return before the store is updated.
+        let store = TestRunnerStore.shared
+        if let wd = workDir { store.workDir = wd }
+        store.run(command: command)
 
         let result: [String: Any] = ["started": true, "command": command as Any]
         guard let data = try? JSONSerialization.data(withJSONObject: result),

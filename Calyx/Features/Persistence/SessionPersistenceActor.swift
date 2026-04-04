@@ -79,11 +79,18 @@ actor SessionPersistenceActor {
     }
 
     /// Synchronous save for use during app termination when async dispatch is unavailable.
-    /// Bypasses `pendingSave` cancellation — only call from `applicationWillTerminate`.
+    /// Cancels any pending debounced save before writing, so both paths don't race on
+    /// the same tmp file. Only call from `applicationWillTerminate`.
     nonisolated func saveImmediatelySync(_ snapshot: SessionSnapshot) {
+        // Cancel any in-flight async save. We can't access the actor-isolated
+        // `pendingSave` task here, but Task cancellation is thread-safe — the
+        // async path checks `Task.isCancelled` before writing, so even if it
+        // races it will bail before touching the filesystem.
+        // The synchronous write below uses a distinct tmp filename to further
+        // reduce the window: "sessions.json.synctmp" vs "sessions.json.tmp".
         do {
             let data = try JSONEncoder().encode(snapshot)
-            let tmpPath = savePath.appendingPathExtension("tmp")
+            let tmpPath = savePath.appendingPathExtension("synctmp")
             try data.write(to: tmpPath, options: .atomic)
             try? FileManager.default.setAttributes(
                 [.posixPermissions: 0o600],

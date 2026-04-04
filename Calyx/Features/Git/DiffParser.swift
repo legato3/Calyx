@@ -18,8 +18,14 @@ enum DiffParser {
         var isTruncated = false
 
         if input.utf8.count > maxBytes {
-            let index = input.utf8.index(input.utf8.startIndex, offsetBy: maxBytes)
-            input = String(input[..<index])
+            // Truncate on a Unicode scalar boundary to avoid splitting a multi-byte character.
+            let utf8 = input.utf8
+            var idx = utf8.index(utf8.startIndex, offsetBy: maxBytes)
+            // Walk back until we're on a scalar boundary (continuation bytes start with 10xxxxxx).
+            while idx > utf8.startIndex && (utf8[idx] & 0xC0) == 0x80 {
+                idx = utf8.index(before: idx)
+            }
+            input = String(input[..<idx])
             isTruncated = true
         }
 

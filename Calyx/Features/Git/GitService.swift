@@ -399,23 +399,16 @@ enum GitService {
         var accumulatedData = ""
 
         for line in lines {
-            var graphPart = ""
-            var dataPart = ""
-            var foundData = false
-
-            for char in line {
-                if !foundData {
-                    if char == "\u{1F}" || char == "\u{1E}" {
-                        foundData = true
-                        dataPart.append(char)
-                    } else if "|*/\\ -_.".contains(char) {
-                        graphPart.append(char)
-                    } else {
-                        graphPart.append(char)
-                    }
-                } else {
-                    dataPart.append(char)
-                }
+            // Split at the first unit-separator (U+001F) or record-separator (U+001E)
+            // rather than iterating character-by-character.
+            let graphPart: String
+            let dataPart: String
+            if let splitIdx = line.firstIndex(where: { $0 == "\u{1F}" || $0 == "\u{1E}" }) {
+                graphPart = String(line[..<splitIdx])
+                dataPart  = String(line[splitIdx...])
+            } else {
+                graphPart = line
+                dataPart  = ""
             }
 
             accumulatedData += dataPart

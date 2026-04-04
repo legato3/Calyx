@@ -72,7 +72,9 @@ actor IPCStore {
             $0.name == name && now.timeIntervalSince($0.lastSeen) <= peerTTL
         }) {
             peers[existing.id]?.lastSeen = now
-            return peers[existing.id]!
+            // Return the updated peer if still present, otherwise fall back to the
+            // snapshot captured before the update (avoids a force-unwrap crash).
+            return peers[existing.id] ?? existing
         }
         let peer = Peer(
             id: UUID(),

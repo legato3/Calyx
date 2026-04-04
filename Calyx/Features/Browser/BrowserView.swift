@@ -12,6 +12,8 @@ class BrowserView: NSView {
     private let webView: WKWebView
     private let state: BrowserState
     private let downloadManager: DownloadManager
+    // Keyed by WKFrameInfo identity — tracks redirect depth per frame.
+    // Entries are cleared in didCommit (navigation committed) so they don't accumulate.
     private var redirectCounts: [ObjectIdentifier: Int] = [:]
     var onTitleChanged: ((String) -> Void)?
     var onURLChanged: ((URL) -> Void)?
@@ -132,9 +134,9 @@ extension BrowserView: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        if let navigation {
-            redirectCounts[ObjectIdentifier(navigation)] = 0
-        }
+        // A navigation committed — the redirect chain for the main frame is resolved.
+        // Clear all frame-keyed redirect counts so they don't accumulate across navigations.
+        redirectCounts.removeAll()
         state.isLoading = true
         state.canGoBack = webView.canGoBack
         state.canGoForward = webView.canGoForward
@@ -156,9 +158,7 @@ extension BrowserView: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if let navigation {
-            redirectCounts.removeValue(forKey: ObjectIdentifier(navigation))
-        }
+        redirectCounts.removeAll()
         state.isLoading = false
         state.canGoBack = webView.canGoBack
         state.canGoForward = webView.canGoForward
@@ -175,9 +175,7 @@ extension BrowserView: WKNavigationDelegate {
         didFail navigation: WKNavigation!,
         withError error: any Error
     ) {
-        if let navigation {
-            redirectCounts.removeValue(forKey: ObjectIdentifier(navigation))
-        }
+        redirectCounts.removeAll()
         state.isLoading = false
         state.lastError = error.localizedDescription
         logger.error("Navigation failed: \(error.localizedDescription)")
@@ -188,9 +186,7 @@ extension BrowserView: WKNavigationDelegate {
         didFailProvisionalNavigation navigation: WKNavigation!,
         withError error: any Error
     ) {
-        if let navigation {
-            redirectCounts.removeValue(forKey: ObjectIdentifier(navigation))
-        }
+        redirectCounts.removeAll()
         state.isLoading = false
         state.lastError = error.localizedDescription
         logger.error("Provisional navigation failed: \(error.localizedDescription)")
