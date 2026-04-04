@@ -243,7 +243,7 @@ final class SuggestedDiffEngine {
         if trimmed.contains("@@") {
             // Find the start of the diff
             if let range = trimmed.range(of: "---") {
-                let patch = String(trimmed[range...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let patch = String(trimmed[range.lowerBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
                 return (patch, "")
             }
             return (trimmed, "")
