@@ -107,6 +107,9 @@ enum GhosttyActionRouter {
         case GHOSTTY_ACTION_SHOW_CHILD_EXITED:
             return handleShowChildExited(app, target: target, value: action.action.child_exited)
 
+        case GHOSTTY_ACTION_COMMAND_FINISHED:
+            return handleCommandFinished(app, target: target, value: action.action.command_finished)
+
         case GHOSTTY_ACTION_RENDERER_HEALTH:
             return handleRendererHealth(app, target: target, health: action.action.renderer_health)
 
@@ -564,6 +567,25 @@ enum GhosttyActionRouter {
             name: .ghosttyShowChildExited,
             object: surfaceView,
             userInfo: ["exit_code": value.exit_code, "runtime_ms": value.timetime_ms]
+        )
+        return true
+    }
+
+    private static func handleCommandFinished(
+        _ app: ghostty_app_t,
+        target: ghostty_target_s,
+        value: ghostty_action_command_finished_s
+    ) -> Bool {
+        guard let surfaceView = surfaceView(from: target) else { return false }
+
+        let exitCode: Int? = value.exit_code < 0 ? nil : Int(value.exit_code)
+        NotificationCenter.default.post(
+            name: .ghosttyCommandFinished,
+            object: surfaceView,
+            userInfo: [
+                "exit_code": exitCode as Any,
+                "duration_ns": value.duration,
+            ]
         )
         return true
     }

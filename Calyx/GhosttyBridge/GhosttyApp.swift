@@ -549,6 +549,7 @@ extension Notification.Name {
     static let ghosttyRendererHealth = Notification.Name("com.calyx.ghostty.rendererHealth")
     static let ghosttyRingBell = Notification.Name("com.calyx.ghostty.ringBell")
     static let ghosttyShowChildExited = Notification.Name("com.calyx.ghostty.showChildExited")
+    static let ghosttyCommandFinished = Notification.Name("com.calyx.ghostty.commandFinished")
     static let ghosttyGotoSplit = Notification.Name("com.calyx.ghostty.gotoSplit")
     static let ghosttyResizeSplit = Notification.Name("com.calyx.ghostty.resizeSplit")
     static let ghosttyEqualizeSplits = Notification.Name("com.calyx.ghostty.equalizeSplits")

@@ -119,6 +119,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         self.ipcController = IPCWindowController(mcpServer: mcpServer, windowSession: windowSession)
         super.init(window: window)
 
+        composeController.onStateChanged = { [weak self] in
+            self?.refreshHostingView()
+        }
+
         // SplitController callbacks
         splitController.getActiveTab = { [weak self] in self?.activeTab }
         splitController.getSplitContainerView = { [weak self] in self?.splitContainerView }
@@ -689,6 +693,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         windowActions.onDiscardAllReviews = { [weak self] in self?.reviewController.discardAllDiffReviews() }
         windowActions.onComposeOverlaySend = { [weak self] text in self?.sendComposeText(text) ?? false }
         windowActions.onDismissComposeOverlay = { [weak self] in self?.dismissComposeOverlay() }
+        windowActions.onToggleComposeOverlay = { [weak self] in self?.toggleComposeOverlay() }
         windowActions.onApplyComposeAssistantEntry = { [weak self] id, run in
             self?.applyComposeAssistantEntry(id: id, run: run) ?? false
         }
@@ -697,6 +702,18 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
         windowActions.onFixComposeAssistantEntry = { [weak self] id in
             self?.fixComposeAssistantEntry(id: id)
+        }
+        windowActions.onExplainCommandBlock = { [weak self] id in
+            self?.explainCommandBlock(id: id)
+        }
+        windowActions.onFixCommandBlock = { [weak self] id in
+            self?.fixCommandBlock(id: id)
+        }
+        windowActions.onApproveOllamaAgent = { [weak self] in
+            self?.approveOllamaAgent() ?? false
+        }
+        windowActions.onStopOllamaAgent = { [weak self] in
+            self?.stopOllamaAgent()
         }
         windowActions.onToggleComposeBroadcast = { [weak self] in
             guard let self else { return }
@@ -1017,6 +1034,34 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         )
     }
 
+    private func explainCommandBlock(id: UUID) {
+        composeController.explainCommandBlock(
+            id: id,
+            activeTab: activeTab,
+            focusedController: focusedController
+        )
+    }
+
+    private func fixCommandBlock(id: UUID) {
+        composeController.fixCommandBlock(
+            id: id,
+            activeTab: activeTab,
+            focusedController: focusedController
+        )
+    }
+
+    private func approveOllamaAgent() -> Bool {
+        composeController.approveAgent(
+            activeTab: activeTab,
+            focusedController: focusedController,
+            sendEnterKey: { [weak self] controller in self?.sendEnterKey(to: controller) }
+        )
+    }
+
+    private func stopOllamaAgent() {
+        composeController.stopAgent(activeTab: activeTab)
+    }
+
     // MARK: - Split Operations
 
     private func handleDividerDrag(leafID: UUID, delta: Double, direction: SplitDirection) {
@@ -1064,6 +1109,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                            name: .ghosttyRingBell, object: nil)
         center.addObserver(self, selector: #selector(handleShowChildExitedNotification(_:)),
                            name: .ghosttyShowChildExited, object: nil)
+        center.addObserver(self, selector: #selector(handleCommandFinishedNotification(_:)),
+                           name: .ghosttyCommandFinished, object: nil)
         center.addObserver(self, selector: #selector(handleRendererHealthNotification(_:)),
                            name: .ghosttyRendererHealth, object: nil)
         center.addObserver(self, selector: #selector(handleColorChangeNotification(_:)),
@@ -1287,6 +1334,36 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 tabID: tab.id
             )
         }
+    }
+
+    @objc private func handleCommandFinishedNotification(_ notification: Notification) {
+        guard let event = GhosttyCommandFinishedEvent.from(notification),
+              let (tab, _) = findTab(for: event.surfaceView) else { return }
+
+        let commandBlockID = tab.finishCommandBlock(
+            surfaceID: event.surfaceView.surfaceController?.id,
+            exitCode: event.exitCode,
+            durationNanoseconds: event.durationNanoseconds,
+            outputSnippet: viewportSnippet(for: event.surfaceView),
+            errorSnippet: tab.lastShellError?.snippet
+        )
+        composeController.handleCommandFinished(
+            for: tab,
+            commandBlockID: commandBlockID
+        )
+        refreshHostingView()
+    }
+
+    private func viewportSnippet(for surfaceView: SurfaceView) -> String? {
+        guard let surface = surfaceView.surfaceController?.surface else { return nil }
+        guard let rawText = GhosttyFFI.surfaceReadViewportText(surface) else { return nil }
+
+        let lines = rawText
+            .components(separatedBy: CharacterSet.newlines)
+            .map { $0.trimmingCharacters(in: CharacterSet.whitespaces) }
+            .filter { !$0.isEmpty }
+        let snippet = lines.suffix(32).joined(separator: "\n")
+        return snippet.isEmpty ? nil : snippet
     }
 
     @objc private func handleRendererHealthNotification(_ notification: Notification) {
@@ -1809,6 +1886,12 @@ extension CalyxWindowController: TerminalControl {
         guard let resolvedID = leafID,
               let controller = tab.registry.controller(for: resolvedID) else { return false }
 
+        noteInjectedCommandIfNeeded(
+            in: tab,
+            surfaceID: controller.id,
+            text: text,
+            pressEnter: pressEnter
+        )
         controller.sendText(text)
         if pressEnter {
             sendEnterKey(to: controller)
@@ -1942,12 +2025,31 @@ extension CalyxWindowController: TerminalControl {
                 guard tab.title.lowercased().contains(needle) else { continue }
                 guard let focusedID = tab.splitTree.focusedLeafID ?? tab.splitTree.allLeafIDs().first,
                       let controller = tab.registry.controller(for: focusedID) else { continue }
+                noteInjectedCommandIfNeeded(
+                    in: tab,
+                    surfaceID: controller.id,
+                    text: text,
+                    pressEnter: pressEnter
+                )
                 controller.sendText(text)
                 if pressEnter { sendEnterKey(to: controller) }
                 return true
             }
         }
         return false
+    }
+
+    private func noteInjectedCommandIfNeeded(
+        in tab: Tab,
+        surfaceID: UUID,
+        text: String,
+        pressEnter: Bool
+    ) {
+        guard pressEnter else { return }
+        let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty else { return }
+        _ = tab.beginCommandBlock(command: command, source: .automation, surfaceID: surfaceID)
+        refreshHostingView()
     }
 
     // MARK: get_pane_output

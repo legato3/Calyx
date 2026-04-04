@@ -38,10 +38,15 @@ final class WindowActions {
     var onDiscardAllReviews: (() -> Void)?
     var onComposeOverlaySend: ((String) -> Bool)?
     var onDismissComposeOverlay: (() -> Void)?
+    var onToggleComposeOverlay: (() -> Void)?
     var onToggleComposeBroadcast: (() -> Void)?
     var onApplyComposeAssistantEntry: ((UUID, Bool) -> Bool)?
     var onExplainComposeAssistantEntry: ((UUID) -> Void)?
     var onFixComposeAssistantEntry: ((UUID) -> Void)?
+    var onExplainCommandBlock: ((UUID) -> Void)?
+    var onFixCommandBlock: ((UUID) -> Void)?
+    var onApproveOllamaAgent: (() -> Bool)?
+    var onStopOllamaAgent: (() -> Void)?
     var onOpenDiff: ((DiffSource) -> Void)?
     var onOpenAggregateDiff: ((String) -> Void)?
     /// Route the shell error captured in the given tab to the nearest Claude pane.

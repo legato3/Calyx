@@ -116,6 +116,23 @@ struct GhosttyShowChildExitedEvent {
     }
 }
 
+struct GhosttyCommandFinishedEvent {
+    let surfaceView: SurfaceView
+    let exitCode: Int?
+    let durationNanoseconds: UInt64
+
+    static func from(_ notification: Notification) -> Self? {
+        guard let surfaceView = notification.object as? SurfaceView else { return nil }
+        let durationNanoseconds = notification.userInfo?["duration_ns"] as? UInt64 ?? 0
+        let exitCodeValue = notification.userInfo?["exit_code"] as? Int
+        return GhosttyCommandFinishedEvent(
+            surfaceView: surfaceView,
+            exitCode: exitCodeValue,
+            durationNanoseconds: durationNanoseconds
+        )
+    }
+}
+
 struct GhosttyRendererHealthEvent {
     let surfaceView: SurfaceView
     let health: ghostty_action_renderer_health_e

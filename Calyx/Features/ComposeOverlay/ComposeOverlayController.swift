@@ -14,9 +14,16 @@ private let logger = Logger(
     category: "ComposeOverlayController"
 )
 
+private let shellPromptSuffixes: [String] = [
+    "$ ", "% ", "❯ ", "➜ ", "> ", "λ ", "# "
+]
+
 @MainActor
 final class ComposeOverlayController {
+    private static let maxAgentIterations = 6
+
     let assistantState = ComposeAssistantState()
+    var onStateChanged: (() -> Void)?
 
     /// The surface ID that will receive composed text.
     /// Set when the overlay opens; cleared when it closes.
@@ -25,6 +32,7 @@ final class ComposeOverlayController {
     /// When `true`, the composed text is sent to every pane in the active tab's split tree
     /// instead of only the targeted surface.
     var broadcastEnabled: Bool = false
+    private var agentTasks: [UUID: Task<Void, Never>] = [:]
 
     // MARK: - Overlay Lifecycle
 
@@ -74,11 +82,18 @@ final class ComposeOverlayController {
                 activeTab: activeTab,
                 focusedController: focusedController,
                 sendEnterKey: sendEnterKey
-            )
+            ) != nil
         case .ollamaCommand:
             return generateSuggestion(
                 from: trimmed,
                 activeTab: activeTab
+            )
+        case .ollamaAgent:
+            return startAgent(
+                goal: trimmed,
+                activeTab: activeTab,
+                focusedController: focusedController,
+                sendEnterKey: sendEnterKey
             )
         }
     }
@@ -101,10 +116,65 @@ final class ComposeOverlayController {
                 activeTab: activeTab,
                 focusedController: focusedController,
                 sendEnterKey: sendEnterKey
-            )
+            ) != nil
         }
 
         return assistantState.loadDraft(from: id)
+    }
+
+    func approveAgent(
+        activeTab: Tab?,
+        focusedController: GhosttySurfaceController?,
+        sendEnterKey: @escaping (GhosttySurfaceController) -> Void
+    ) -> Bool {
+        guard let activeTab,
+              let session = activeTab.ollamaAgentSession,
+              session.canApprove,
+              let command = session.pendingCommand
+        else { return false }
+
+        guard let commandBlockID = dispatchShellCommand(
+            command,
+            entryID: nil,
+            source: .assistant,
+            activeTab: activeTab,
+            focusedController: focusedController,
+            sendEnterKey: sendEnterKey
+        ) else {
+            return false
+        }
+
+        activeTab.markOllamaAgentRunning(blockID: commandBlockID)
+        onStateChanged?()
+        return true
+    }
+
+    func stopAgent(activeTab: Tab?) {
+        guard let activeTab else { return }
+        cancelAgentTask(for: activeTab.id)
+        activeTab.stopOllamaAgent()
+        onStateChanged?()
+    }
+
+    func handleCommandFinished(
+        for activeTab: Tab?,
+        commandBlockID: UUID
+    ) {
+        guard let activeTab,
+              let session = activeTab.ollamaAgentSession,
+              session.status == .runningCommand
+        else { return }
+
+        if let lastCommandBlockID = session.lastCommandBlockID,
+           lastCommandBlockID != commandBlockID {
+            return
+        }
+
+        guard let block = activeTab.commandBlock(id: commandBlockID) else { return }
+        activeTab.recordOllamaAgentObservation(observationText(for: block))
+        onStateChanged?()
+
+        planNextAgentStep(for: activeTab)
     }
 
     func explainEntry(
@@ -130,7 +200,60 @@ final class ComposeOverlayController {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let response = try await OllamaCommandService.explainCommandOutput(command: command, output: output, pwd: pwd)
+                let response = try await OllamaCommandService.streamExplainCommandOutput(
+                    command: command,
+                    output: output,
+                    pwd: pwd
+                ) { [weak self] partial in
+                    self?.assistantState.updatePendingEntry(
+                        id: explainID,
+                        response: partial,
+                        contextSnippet: output
+                    )
+                }
+                self.assistantState.finishEntry(id: explainID, response: response, contextSnippet: output)
+            } catch {
+                self.assistantState.failEntry(id: explainID, message: error.localizedDescription, contextSnippet: output)
+            }
+        }
+    }
+
+    func explainCommandBlock(
+        id: UUID,
+        activeTab: Tab?,
+        focusedController: GhosttySurfaceController?
+    ) {
+        guard let activeTab,
+              let block = activeTab.commandBlock(id: id)
+        else { return }
+        let output = resolveBlockContextSnippet(block: block, activeTab: activeTab, focusedController: focusedController)
+        guard let output else {
+            let explainID = assistantState.beginEntry(kind: .explanation, prompt: block.titleText)
+            assistantState.failEntry(id: explainID, message: "No recent terminal output was available to explain.")
+            return
+        }
+
+        let explainID = assistantState.beginEntry(
+            kind: .explanation,
+            prompt: block.titleText,
+            contextSnippet: output
+        )
+        let pwd = activeTab.pwd
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let response = try await OllamaCommandService.streamExplainCommandOutput(
+                    command: block.command,
+                    output: output,
+                    pwd: pwd
+                ) { [weak self] partial in
+                    self?.assistantState.updatePendingEntry(
+                        id: explainID,
+                        response: partial,
+                        contextSnippet: output
+                    )
+                }
                 self.assistantState.finishEntry(id: explainID, response: response, contextSnippet: output)
             } catch {
                 self.assistantState.failEntry(id: explainID, message: error.localizedDescription, contextSnippet: output)
@@ -161,7 +284,62 @@ final class ComposeOverlayController {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let response = try await OllamaCommandService.suggestFix(command: command, output: output, pwd: pwd)
+                let response = try await OllamaCommandService.streamSuggestFix(
+                    command: command,
+                    output: output,
+                    pwd: pwd
+                ) { [weak self] partial in
+                    self?.assistantState.updatePendingEntry(
+                        id: fixID,
+                        response: partial,
+                        command: partial,
+                        contextSnippet: output
+                    )
+                }
+                self.assistantState.finishEntry(id: fixID, response: response, command: response, contextSnippet: output)
+            } catch {
+                self.assistantState.failEntry(id: fixID, message: error.localizedDescription, contextSnippet: output)
+            }
+        }
+    }
+
+    func fixCommandBlock(
+        id: UUID,
+        activeTab: Tab?,
+        focusedController: GhosttySurfaceController?
+    ) {
+        guard let activeTab,
+              let block = activeTab.commandBlock(id: id)
+        else { return }
+        let output = resolveBlockContextSnippet(block: block, activeTab: activeTab, focusedController: focusedController)
+        guard let output else {
+            let fixID = assistantState.beginEntry(kind: .fixSuggestion, prompt: block.titleText)
+            assistantState.failEntry(id: fixID, message: "No recent terminal output was available to fix.")
+            return
+        }
+
+        let fixID = assistantState.beginEntry(
+            kind: .fixSuggestion,
+            prompt: block.titleText,
+            contextSnippet: output
+        )
+        let pwd = activeTab.pwd
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let response = try await OllamaCommandService.streamSuggestFix(
+                    command: block.command,
+                    output: output,
+                    pwd: pwd
+                ) { [weak self] partial in
+                    self?.assistantState.updatePendingEntry(
+                        id: fixID,
+                        response: partial,
+                        command: partial,
+                        contextSnippet: output
+                    )
+                }
                 self.assistantState.finishEntry(id: fixID, response: response, command: response, contextSnippet: output)
             } catch {
                 self.assistantState.failEntry(id: fixID, message: error.localizedDescription, contextSnippet: output)
@@ -178,7 +356,13 @@ final class ComposeOverlayController {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let response = try await OllamaCommandService.generateCommand(for: prompt, pwd: pwd)
+                let response = try await OllamaCommandService.streamCommand(for: prompt, pwd: pwd) { [weak self] partial in
+                    self?.assistantState.updatePendingEntry(
+                        id: entryID,
+                        response: partial,
+                        command: partial
+                    )
+                }
                 self.assistantState.finishEntry(id: entryID, response: response, command: response)
             } catch {
                 self.assistantState.failEntry(id: entryID, message: error.localizedDescription)
@@ -187,18 +371,105 @@ final class ComposeOverlayController {
         return true
     }
 
+    private func startAgent(
+        goal: String,
+        activeTab: Tab?,
+        focusedController _: GhosttySurfaceController?,
+        sendEnterKey _: @escaping (GhosttySurfaceController) -> Void
+    ) -> Bool {
+        guard let activeTab else { return false }
+        cancelAgentTask(for: activeTab.id)
+        activeTab.startOllamaAgent(goal: goal)
+        assistantState.setDraftText("")
+        onStateChanged?()
+        planNextAgentStep(for: activeTab)
+        return true
+    }
+
+    private func planNextAgentStep(for activeTab: Tab) {
+        guard let session = activeTab.ollamaAgentSession,
+              !session.status.isTerminal
+        else { return }
+
+        if session.iteration >= Self.maxAgentIterations {
+            activeTab.completeOllamaAgent(
+                summary: "Reached the current step limit. Review the latest output and continue manually if needed."
+            )
+            onStateChanged?()
+            return
+        }
+
+        let sessionID = session.id
+        let tabID = activeTab.id
+        let goal = session.goal
+        let pwd = activeTab.pwd
+        let recentCommandContext = agentRecentCommandContext(for: activeTab)
+        let priorAgentContext = agentPriorContext(for: session)
+
+        cancelAgentTask(for: tabID)
+        activeTab.updateOllamaAgentPlanPreview("Planning the next terminal step…")
+        onStateChanged?()
+
+        agentTasks[tabID] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.agentTasks.removeValue(forKey: tabID)
+                self.onStateChanged?()
+            }
+
+            do {
+                let decision = try await OllamaCommandService.streamAgentDecision(
+                    goal: goal,
+                    pwd: pwd,
+                    recentCommandContext: recentCommandContext,
+                    priorAgentContext: priorAgentContext
+                ) { [weak self] partial in
+                    guard let self,
+                          activeTab.ollamaAgentSession?.id == sessionID
+                    else { return }
+                    activeTab.updateOllamaAgentPlanPreview(partial)
+                    self.onStateChanged?()
+                }
+
+                guard activeTab.ollamaAgentSession?.id == sessionID else { return }
+                switch decision.action {
+                case .run:
+                    guard let command = decision.command else {
+                        activeTab.failOllamaAgent("Ollama returned a run action without a command.")
+                        return
+                    }
+                    activeTab.setOllamaAgentAwaitingApproval(command: command, message: decision.message)
+                case .done:
+                    activeTab.completeOllamaAgent(summary: decision.message)
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard activeTab.ollamaAgentSession?.id == sessionID else { return }
+                activeTab.failOllamaAgent(error.localizedDescription)
+            }
+        }
+    }
+
+    @discardableResult
     private func dispatchShellCommand(
         _ text: String,
         entryID: UUID?,
+        source: TerminalCommandSource? = nil,
         activeTab: Tab?,
         focusedController: GhosttySurfaceController?,
         sendEnterKey: @escaping (GhosttySurfaceController) -> Void
-    ) -> Bool {
+    ) -> UUID? {
         guard let controller = resolveTargetController(activeTab: activeTab, focusedController: focusedController) else {
-            return false
+            return nil
         }
 
         let commandText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let commandBlockID = activeTab?.beginCommandBlock(
+            command: commandText,
+            source: source ?? (entryID == nil ? .shell : .assistant),
+            surfaceID: controller.id
+        )
         let effectiveEntryID: UUID
         if let entryID {
             effectiveEntryID = entryID
@@ -230,8 +501,16 @@ final class ComposeOverlayController {
 
         assistantState.setDraftText("")
         scheduleContextRefresh(for: effectiveEntryID, activeTab: activeTab, focusedController: focusedController)
+        if let commandBlockID {
+            scheduleCommandBlockRefresh(
+                blockID: commandBlockID,
+                surfaceID: controller.id,
+                activeTab: activeTab,
+                focusedController: focusedController
+            )
+        }
         logger.debug("Sent compose text (\(text.count) chars) to surface \(String(describing: self.targetSurfaceID))\(self.broadcastEnabled ? " [broadcast]" : "")")
-        return true
+        return commandBlockID
     }
 
     private func scheduleContextRefresh(
@@ -267,11 +546,48 @@ final class ComposeOverlayController {
         return readViewportSnippet(activeTab: activeTab, focusedController: focusedController)
     }
 
-    private func readViewportSnippet(
-        activeTab: Tab?,
+    private func resolveBlockContextSnippet(
+        block: TerminalCommandBlock,
+        activeTab: Tab,
         focusedController: GhosttySurfaceController?
     ) -> String? {
-        guard let controller = resolveTargetController(activeTab: activeTab, focusedController: focusedController),
+        if let errorSnippet = block.errorSnippet,
+           !errorSnippet.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return errorSnippet
+        }
+
+        if let outputSnippet = block.outputSnippet,
+           !outputSnippet.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return outputSnippet
+        }
+
+        if let shellError = activeTab.lastShellError?.snippet,
+           !shellError.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return shellError
+        }
+
+        return readViewportSnippet(
+            activeTab: activeTab,
+            preferredSurfaceID: block.surfaceID,
+            focusedController: focusedController
+        )
+    }
+
+    private func readViewportSnippet(
+        activeTab: Tab?,
+        preferredSurfaceID: UUID? = nil,
+        focusedController: GhosttySurfaceController?
+    ) -> String? {
+        let controller: GhosttySurfaceController?
+        if let preferredSurfaceID,
+           let activeTab,
+           let preferredController = activeTab.registry.controller(for: preferredSurfaceID) {
+            controller = preferredController
+        } else {
+            controller = resolveTargetController(activeTab: activeTab, focusedController: focusedController)
+        }
+
+        guard let controller,
               let surface = controller.surface,
               let text = GhosttyFFI.surfaceReadViewportText(surface)
         else { return nil }
@@ -282,6 +598,52 @@ final class ComposeOverlayController {
             .filter { !$0.isEmpty }
         let snippet = lines.suffix(24).joined(separator: "\n")
         return snippet.isEmpty ? nil : snippet
+    }
+
+    private func scheduleCommandBlockRefresh(
+        blockID: UUID,
+        surfaceID: UUID,
+        activeTab: Tab?,
+        focusedController: GhosttySurfaceController?
+    ) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            for _ in 0..<30 {
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                guard let activeTab,
+                      let block = activeTab.commandBlock(id: blockID),
+                      block.status == .running
+                else { return }
+
+                let snippet = self.readViewportSnippet(
+                    activeTab: activeTab,
+                    preferredSurfaceID: surfaceID,
+                    focusedController: focusedController
+                )
+                guard let snippet else { continue }
+                if self.isPromptReady(snippet) {
+                    _ = activeTab.finishCommandBlock(
+                        id: blockID,
+                        surfaceID: surfaceID,
+                        fallbackCommand: block.command,
+                        exitCode: activeTab.lastShellError == nil ? 0 : 1,
+                        durationNanoseconds: nil,
+                        outputSnippet: snippet,
+                        errorSnippet: activeTab.lastShellError?.snippet
+                    )
+                    return
+                }
+            }
+        }
+    }
+
+    private func isPromptReady(_ text: String) -> Bool {
+        let lines = text
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard let lastLine = lines.last else { return false }
+        return shellPromptSuffixes.contains { lastLine.hasSuffix($0) || lastLine.contains($0) }
     }
 
     private func resolveTargetController(
@@ -304,5 +666,46 @@ final class ComposeOverlayController {
             return controller
         }
         return tab.splitTree.allLeafIDs().compactMap { tab.registry.controller(for: $0) }.first
+    }
+
+    private func cancelAgentTask(for tabID: UUID) {
+        agentTasks.removeValue(forKey: tabID)?.cancel()
+    }
+
+    private func agentRecentCommandContext(for activeTab: Tab) -> String {
+        activeTab.commandBlocks
+            .prefix(6)
+            .reversed()
+            .map { block in
+                let snippet = block.primarySnippet?.replacingOccurrences(of: "\n", with: " | ") ?? "(no output)"
+                let exitText = block.exitCode.map(String.init) ?? "?"
+                return "[\(block.status.label)] exit=\(exitText) command=\(block.titleText)\n\(snippet)"
+            }
+            .joined(separator: "\n\n")
+    }
+
+    private func agentPriorContext(for session: OllamaAgentSession) -> String {
+        session.steps
+            .prefix(10)
+            .reversed()
+            .map { step in
+                if let command = step.command, !command.isEmpty {
+                    return "\(step.kind.title): \(step.text)\nCommand: \(command)"
+                }
+                return "\(step.kind.title): \(step.text)"
+            }
+            .joined(separator: "\n\n")
+    }
+
+    private func observationText(for block: TerminalCommandBlock) -> String {
+        let command = block.titleText
+        let exitText = block.exitCode.map(String.init) ?? "?"
+        let snippet = block.primarySnippet ?? "No output captured."
+        return """
+        Command finished with exit \(exitText).
+        Command: \(command)
+        Output:
+        \(snippet)
+        """
     }
 }

@@ -165,33 +165,47 @@ struct MainContentView: View {
                                     }
                                 }
 
-                                if windowSession.showComposeOverlay {
+                                if let assistant = actions.composeAssistantState {
                                     VStack(spacing: 0) {
-                                        ComposeResizeHandle(
-                                            currentHeight: windowSession.composeOverlayHeight,
-                                            onHeightChanged: { windowSession.composeOverlayHeight = $0 }
-                                        )
-
-                                        if let assistant = actions.composeAssistantState {
-                                            let composeBarHeight = max(
-                                                windowSession.composeOverlayHeight,
-                                                assistant.interactions.isEmpty ? 120 : 220
+                                        if windowSession.showComposeOverlay {
+                                            ComposeResizeHandle(
+                                                currentHeight: windowSession.composeOverlayHeight,
+                                                onHeightChanged: { windowSession.composeOverlayHeight = $0 }
                                             )
-                                            ComposeCommandBarView(
-                                                assistant: assistant,
-                                                shellError: activeTab?.lastShellError,
-                                                ollamaModel: ollamaModel,
-                                                ollamaEndpoint: ollamaEndpoint,
-                                                broadcastEnabled: actions.composeBroadcastEnabled,
-                                                onToggleBroadcast: { actions.onToggleComposeBroadcast?() },
-                                                onSend: actions.onComposeOverlaySend,
-                                                onDismiss: actions.onDismissComposeOverlay,
-                                                onApplyEntry: actions.onApplyComposeAssistantEntry,
-                                                onExplainEntry: actions.onExplainComposeAssistantEntry,
-                                                onFixEntry: actions.onFixComposeAssistantEntry
-                                            )
-                                            .frame(height: composeBarHeight)
                                         }
+
+                                        let hasExpandedContent = windowSession.showComposeOverlay
+                                            || assistant.isBusy
+                                            || !assistant.interactions.isEmpty
+                                            || !(activeTab?.commandBlocks.isEmpty ?? true)
+                                            || activeTab?.ollamaAgentSession != nil
+                                            || activeTab?.lastShellError != nil
+                                        let composeBarHeight = hasExpandedContent
+                                            ? max(windowSession.composeOverlayHeight, 260)
+                                            : 122
+
+                                        ComposeCommandBarView(
+                                            assistant: assistant,
+                                            commandBlocks: activeTab?.commandBlocks ?? [],
+                                            agentSession: activeTab?.ollamaAgentSession,
+                                            shellError: activeTab?.lastShellError,
+                                            ollamaModel: ollamaModel,
+                                            ollamaEndpoint: ollamaEndpoint,
+                                            broadcastEnabled: actions.composeBroadcastEnabled,
+                                            isExpanded: windowSession.showComposeOverlay,
+                                            onToggleExpanded: { actions.onToggleComposeOverlay?() },
+                                            onToggleBroadcast: { actions.onToggleComposeBroadcast?() },
+                                            onSend: actions.onComposeOverlaySend,
+                                            onDismiss: actions.onDismissComposeOverlay,
+                                            onApplyEntry: actions.onApplyComposeAssistantEntry,
+                                            onExplainEntry: actions.onExplainComposeAssistantEntry,
+                                            onFixEntry: actions.onFixComposeAssistantEntry,
+                                            onExplainCommandBlock: actions.onExplainCommandBlock,
+                                            onFixCommandBlock: actions.onFixCommandBlock,
+                                            onApproveAgent: actions.onApproveOllamaAgent,
+                                            onStopAgent: actions.onStopOllamaAgent
+                                        )
+                                        .frame(height: composeBarHeight)
                                     }
                                     .glassEffect(.clear.tint(chromeTint), in: .rect)
                                 }
@@ -337,45 +351,57 @@ final class DiffGlassHostView: NSView {
 
 private struct ComposeCommandBarView: View {
     @Bindable var assistant: ComposeAssistantState
+    let commandBlocks: [TerminalCommandBlock]
+    let agentSession: OllamaAgentSession?
     let shellError: ShellErrorEvent?
     let ollamaModel: String
     let ollamaEndpoint: String
     let broadcastEnabled: Bool
+    let isExpanded: Bool
+    let onToggleExpanded: () -> Void
     let onToggleBroadcast: () -> Void
     let onSend: ((String) -> Bool)?
     let onDismiss: (() -> Void)?
     let onApplyEntry: ((UUID, Bool) -> Bool)?
     let onExplainEntry: ((UUID) -> Void)?
     let onFixEntry: ((UUID) -> Void)?
+    let onExplainCommandBlock: ((UUID) -> Void)?
+    let onFixCommandBlock: ((UUID) -> Void)?
+    let onApproveAgent: (() -> Bool)?
+    let onStopAgent: (() -> Void)?
+
+    private var visibleCommandBlocks: [TerminalCommandBlock] {
+        Array(commandBlocks.prefix(isExpanded ? 6 : 1))
+    }
+
+    private var latestCollapsedAssistantEntry: ComposeAssistantEntry? {
+        assistant.interactions.first
+    }
+
+    private var latestCollapsedCommandBlock: TerminalCommandBlock? {
+        visibleCommandBlocks.first
+    }
+
+    private var isOllamaMode: Bool {
+        assistant.mode == .ollamaCommand || assistant.mode == .ollamaAgent
+    }
+
+    private var isThinking: Bool {
+        assistant.isBusy || agentSession?.status == .planning
+    }
 
     var body: some View {
         VStack(spacing: 10) {
             header
 
-            if let shellError {
+            if isExpanded, let shellError {
                 errorBanner(shellError)
             }
 
-            if assistant.interactions.isEmpty {
-                emptyState
+            if isExpanded {
+                expandedContent
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(assistant.interactions) { entry in
-                            ComposeAssistantEntryCard(
-                                entry: entry,
-                                onEdit: { _ = onApplyEntry?(entry.id, false) },
-                                onRun: { _ = onApplyEntry?(entry.id, true) },
-                                onExplain: { onExplainEntry?(entry.id) },
-                                onFix: { onFixEntry?(entry.id) }
-                            )
-                        }
-                    }
-                    .padding(.horizontal, 1)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .layoutPriority(1)
-                .scrollIndicators(.hidden)
+                collapsedContent
             }
 
             VStack(spacing: 6) {
@@ -391,9 +417,7 @@ private struct ComposeCommandBarView: View {
                 .frame(minHeight: 78, maxHeight: 108)
 
                 HStack {
-                    Text(assistant.mode == .ollamaCommand
-                         ? "Return asks Ollama for a command. Shift-Return inserts a newline."
-                         : "Return sends the command. Shift-Return inserts a newline.")
+                    Text(modeHintText)
                     Spacer()
                     Text("Esc closes")
                 }
@@ -420,9 +444,9 @@ private struct ComposeCommandBarView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .frame(width: 180)
+            .frame(width: 250)
 
-            if assistant.mode == .ollamaCommand {
+            if isOllamaMode {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(ollamaModel.isEmpty ? OllamaCommandService.defaultModel : ollamaModel)
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -438,11 +462,11 @@ private struct ComposeCommandBarView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if assistant.isBusy {
+            if isThinking {
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Thinking…")
+                    Text(agentSession?.status == .planning ? "Planning…" : "Thinking…")
                         .font(.system(size: 11, design: .rounded))
                         .foregroundStyle(.secondary)
                 }
@@ -455,6 +479,10 @@ private struct ComposeCommandBarView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }
+
+            Button(isExpanded ? "Collapse" : "Expand", action: onToggleExpanded)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
 
             Button(action: onToggleBroadcast) {
                 Image(systemName: broadcastEnabled
@@ -470,12 +498,160 @@ private struct ComposeCommandBarView: View {
         }
     }
 
+    @ViewBuilder
+    private var expandedContent: some View {
+        if visibleCommandBlocks.isEmpty && assistant.interactions.isEmpty && agentSession == nil {
+            emptyState
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    if let agentSession {
+                        agentSection(agentSession)
+                    }
+
+                    if !visibleCommandBlocks.isEmpty {
+                        commandBlockSection(title: "Recent Commands", blocks: visibleCommandBlocks)
+                    }
+
+                    if !assistant.interactions.isEmpty {
+                        assistantSection
+                    }
+                }
+                .padding(.horizontal, 1)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .layoutPriority(1)
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    @ViewBuilder
+    private var collapsedContent: some View {
+        if let agentSession,
+           shouldPrioritizeAgentSession(agentSession) {
+            ComposeAgentSessionCard(
+                session: agentSession,
+                compact: true,
+                onApprove: { _ = onApproveAgent?() },
+                onStop: { onStopAgent?() }
+            )
+        } else if let entry = latestCollapsedAssistantEntry,
+           shouldPrioritizeAssistantEntry(entry) {
+            ComposeAssistantEntryCard(
+                entry: entry,
+                compact: true,
+                onEdit: { _ = onApplyEntry?(entry.id, false) },
+                onRun: { _ = onApplyEntry?(entry.id, true) },
+                onExplain: { onExplainEntry?(entry.id) },
+                onFix: { onFixEntry?(entry.id) }
+            )
+        } else if let block = latestCollapsedCommandBlock {
+            ComposeCommandBlockCard(
+                block: block,
+                compact: true,
+                onExplain: { onExplainCommandBlock?(block.id) },
+                onFix: { onFixCommandBlock?(block.id) }
+            )
+        } else if let shellError {
+            compactBanner(shellError.snippet, systemImage: "exclamationmark.triangle.fill", tint: .orange)
+        } else {
+            compactBanner(
+                assistant.mode == .ollamaAgent
+                    ? "Give the agent a task, approve its next command, then let it continue from command results."
+                    : assistant.mode == .ollamaCommand
+                    ? "Ask Ollama for a command or expand to inspect recent command history."
+                    : "Type a command or expand to inspect recent command history and follow-up actions.",
+                systemImage: "terminal",
+                tint: .secondary
+            )
+        }
+    }
+
+    private func shouldPrioritizeAssistantEntry(_ entry: ComposeAssistantEntry) -> Bool {
+        guard let block = latestCollapsedCommandBlock else { return true }
+        return entry.createdAt >= block.startedAt
+    }
+
+    private var modeHintText: String {
+        switch assistant.mode {
+        case .shell:
+            return "Return sends the command. Shift-Return inserts a newline."
+        case .ollamaCommand:
+            return "Return asks Ollama for a command. Shift-Return inserts a newline."
+        case .ollamaAgent:
+            return "Return starts an agent run. Approve each proposed command from the card above."
+        }
+    }
+
+    private func shouldPrioritizeAgentSession(_ session: OllamaAgentSession) -> Bool {
+        if let entry = latestCollapsedAssistantEntry,
+           entry.createdAt > session.updatedAt {
+            return false
+        }
+        if let block = latestCollapsedCommandBlock,
+           block.startedAt > session.updatedAt,
+           session.status.isTerminal {
+            return false
+        }
+        return true
+    }
+
+    private func agentSection(_ session: OllamaAgentSession) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Agent")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+            ComposeAgentSessionCard(
+                session: session,
+                compact: false,
+                onApprove: { _ = onApproveAgent?() },
+                onStop: { onStopAgent?() }
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func commandBlockSection(title: String, blocks: [TerminalCommandBlock]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+            ForEach(blocks) { block in
+                ComposeCommandBlockCard(
+                    block: block,
+                    compact: false,
+                    onExplain: { onExplainCommandBlock?(block.id) },
+                    onFix: { onFixCommandBlock?(block.id) }
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var assistantSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Assistant")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+            ForEach(assistant.interactions) { entry in
+                ComposeAssistantEntryCard(
+                    entry: entry,
+                    onEdit: { _ = onApplyEntry?(entry.id, false) },
+                    onRun: { _ = onApplyEntry?(entry.id, true) },
+                    onExplain: { onExplainEntry?(entry.id) },
+                    onFix: { onFixEntry?(entry.id) }
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Ask for a command, run shell input, then use Explain or Fix on the resulting card.")
+            Text("Run commands from here, then reuse the resulting blocks for Explain, Fix, or reruns.")
                 .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(.secondary)
-            Text("This is the first Warp-style pass: command suggestions, reusable cards, and output-aware follow-ups all stay in one command bar.")
+            Text("Shell, one-shot Ollama suggestions, and the approval-based agent loop all stay in the same terminal bar.")
                 .font(.system(size: 10, design: .rounded))
                 .foregroundStyle(.tertiary)
         }
@@ -519,17 +695,227 @@ private struct ComposeCommandBarView: View {
                 .fill(Color.orange.opacity(0.08))
         )
     }
+
+    private func compactBanner(_ text: String, systemImage: String, tint: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(tint)
+            Text(text)
+                .font(.system(size: 10, design: .rounded))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+    }
+}
+
+private struct ComposeAgentSessionCard: View {
+    let session: OllamaAgentSession
+    let compact: Bool
+    let onApprove: () -> Void
+    let onStop: () -> Void
+
+    private var statusTint: Color {
+        switch session.status {
+        case .planning:
+            return .secondary
+        case .awaitingApproval:
+            return .orange
+        case .runningCommand:
+            return .accentColor
+        case .completed:
+            return .green
+        case .failed:
+            return .red
+        case .stopped:
+            return .secondary
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 6 : 8) {
+            HStack(spacing: 8) {
+                Text("Agent")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Color.white.opacity(0.08)))
+
+                Text(session.status.label)
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(statusTint)
+
+                Text("Step \(session.iteration + (session.status == .runningCommand ? 0 : 1))")
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundStyle(.tertiary)
+
+                Spacer()
+
+                Text(session.updatedAt.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Goal")
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(.tertiary)
+                Text(session.goal)
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .lineLimit(compact ? 2 : 3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if let pendingCommand = session.pendingCommand, !pendingCommand.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Next command")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                    Text(pendingCommand)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                        .lineLimit(compact ? 3 : nil)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            if let planText = session.latestPlanText, !planText.isEmpty {
+                Text(planText)
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(session.status == .failed ? .red : .secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(compact ? 3 : 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if session.canApprove || !session.status.isTerminal {
+                HStack(spacing: 8) {
+                    if session.canApprove {
+                        Button("Approve & Run", action: onApprove)
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(compact ? .mini : .small)
+                    }
+
+                    if !session.status.isTerminal {
+                        Button("Stop", action: onStop)
+                            .buttonStyle(.bordered)
+                            .controlSize(compact ? .mini : .small)
+                    }
+
+                    Spacer()
+                }
+            }
+        }
+        .padding(compact ? 9 : 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(compact ? 0.04 : 0.05))
+        )
+    }
+}
+
+private struct ComposeCommandBlockCard: View {
+    let block: TerminalCommandBlock
+    let compact: Bool
+    let onExplain: () -> Void
+    let onFix: () -> Void
+
+    private var statusTint: Color {
+        switch block.status {
+        case .running:
+            return .secondary
+        case .succeeded:
+            return .green
+        case .failed:
+            return .red
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 6 : 8) {
+            HStack(spacing: 8) {
+                Text(block.source.label)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Color.white.opacity(0.08)))
+
+                Text(block.status.label)
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(statusTint)
+
+                if let durationText = block.durationText {
+                    Text(durationText)
+                        .font(.system(size: 9, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer()
+
+                Text(block.startedAt.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Text(block.titleText)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .lineLimit(compact ? 2 : nil)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let snippet = block.primarySnippet {
+                Text(snippet)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(block.status == .failed ? .red : .secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(compact ? 3 : 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if !compact {
+                HStack(spacing: 8) {
+                    if block.canExplain {
+                        Button("Explain", action: onExplain)
+                    }
+                    if block.canFix {
+                        Button("Fix", action: onFix)
+                    }
+                    Spacer()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(compact ? 9 : 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(compact ? 0.04 : 0.05))
+        )
+    }
 }
 
 private struct ComposeAssistantEntryCard: View {
     let entry: ComposeAssistantEntry
+    var compact: Bool = false
     let onEdit: () -> Void
     let onRun: () -> Void
     let onExplain: () -> Void
     let onFix: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: compact ? 6 : 8) {
             HStack(spacing: 8) {
                 Text(entry.kind.title)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -554,16 +940,19 @@ private struct ComposeAssistantEntryCard: View {
                     .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(entry.status == .failed ? .red : .primary)
                     .textSelection(.enabled)
+                    .lineLimit(compact ? 4 : nil)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text(entry.primaryText)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(entry.status == .failed ? .red : .primary)
                     .textSelection(.enabled)
+                    .lineLimit(compact ? 4 : nil)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if let contextSnippet = entry.contextSnippet,
+            if !compact,
+               let contextSnippet = entry.contextSnippet,
                !contextSnippet.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Context")
@@ -578,28 +967,30 @@ private struct ComposeAssistantEntryCard: View {
                 }
             }
 
-            HStack(spacing: 8) {
-                if entry.canInsert {
-                    Button("Edit", action: onEdit)
+            if !compact {
+                HStack(spacing: 8) {
+                    if entry.canInsert {
+                        Button("Edit", action: onEdit)
+                    }
+                    if entry.canRun {
+                        Button(entry.kind == .shellDispatch ? "Run Again" : "Run", action: onRun)
+                    }
+                    if entry.canExplain {
+                        Button("Explain", action: onExplain)
+                    }
+                    if entry.canFix {
+                        Button("Fix", action: onFix)
+                    }
+                    Spacer()
                 }
-                if entry.canRun {
-                    Button(entry.kind == .shellDispatch ? "Run Again" : "Run", action: onRun)
-                }
-                if entry.canExplain {
-                    Button("Explain", action: onExplain)
-                }
-                if entry.canFix {
-                    Button("Fix", action: onFix)
-                }
-                Spacer()
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
         }
-        .padding(10)
+        .padding(compact ? 9 : 10)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.05))
+                .fill(Color.white.opacity(compact ? 0.04 : 0.05))
         )
     }
 }
