@@ -99,7 +99,16 @@ final class ComposeOverlayController {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
 
-        switch assistantState.mode {
+        // Smart routing: when the user hasn't locked a mode, detect their
+        // intent from the draft text and route accordingly. Shell commands
+        // still dispatch to shell; natural-language goals dispatch to the
+        // user's last-used agent backend.
+        let effective = assistantState.effectiveMode(for: trimmed)
+        let routedFromShellDetection = (!assistantState.isModeLocked
+            && assistantState.mode == .shell
+            && effective.isAgentMode)
+
+        switch effective {
         case .shell:
             return dispatchShellCommand(
                 raw,
@@ -116,6 +125,7 @@ final class ComposeOverlayController {
         case .ollamaAgent:
             let enrichedGoal = AgentPromptContextBuilder.buildPrompt(goal: trimmed, activeTab: activeTab)
             activeTab?.clearAttachedBlocks()
+            if routedFromShellDetection { markAutoRouteHintSeen() }
             return startAgent(
                 goal: enrichedGoal,
                 backend: .ollama,
@@ -126,6 +136,7 @@ final class ComposeOverlayController {
         case .claudeAgent:
             let enriched = AgentPromptContextBuilder.buildPrompt(goal: trimmed, activeTab: activeTab)
             activeTab?.clearAttachedBlocks()
+            if routedFromShellDetection { markAutoRouteHintSeen() }
             return startAgent(
                 goal: enriched,
                 backend: .claudeSubscription,
@@ -133,6 +144,14 @@ final class ComposeOverlayController {
                 focusedController: focusedController,
                 sendEnterKey: sendEnterKey
             )
+        }
+    }
+
+    private func markAutoRouteHintSeen() {
+        let defaults = UserDefaults.standard
+        if !defaults.bool(forKey: AppStorageKeys.hasSeenAgentAutoRouteHint) {
+            assistantState.showAutoRouteHint = true
+            defaults.set(true, forKey: AppStorageKeys.hasSeenAgentAutoRouteHint)
         }
     }
 

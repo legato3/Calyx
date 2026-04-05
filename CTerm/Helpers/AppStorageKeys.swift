@@ -15,6 +15,9 @@ enum AppStorageKeys {
     static let ollamaModel = "ollamaModel"
     static let claudeCLIPath = "claudeCLIPath"
     static let composeAssistantMode = "composeAssistantMode"
+    static let composeModeLocked = "cterm.composeModeLocked"
+    static let composeLastAgentMode = "cterm.composeLastAgentMode"
+    static let hasSeenAgentAutoRouteHint = "cterm.hasSeenAgentAutoRouteHint"
     // Active AI features
     static let activeAIEnabled = "activeAIEnabled"
     static let nextCommandEnabled = "nextCommandEnabled"

@@ -597,6 +597,15 @@ private struct ComposeCommandBarView: View {
     }
 
     private var contextHint: ContextHint {
+        // First-time auto-route: explain what just happened.
+        if assistant.showAutoRouteHint {
+            return ContextHint(
+                text: "⚡ Sent to Agent — press ⌘↩ next time to skip detection",
+                icon: "sparkles", tint: .purple,
+                actionLabel: "Got it",
+                onAction: { assistant.showAutoRouteHint = false }
+            )
+        }
         if assistant.mode == .shell, shellError != nil {
             return ContextHint(
                 text: "Last command failed — ⌘↩ to fix",
@@ -623,20 +632,33 @@ private struct ComposeCommandBarView: View {
             return ContextHint(text: "Thinking…", icon: "ellipsis", tint: .secondary)
         }
         let draft = assistant.draftText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !draft.isEmpty && assistant.mode == .shell {
-            let intent = assistant.detectedIntent
+        let effective = assistant.effectiveMode(for: assistant.draftText)
+
+        // Unlocked auto-detect mode: show what Return will do right now.
+        if !assistant.isModeLocked && !draft.isEmpty {
+            if effective.isAgentMode {
+                return ContextHint(
+                    text: "↩ sends to Agent (auto-detected)",
+                    icon: "sparkles", tint: .purple
+                )
+            }
+            return ContextHint(text: "↩ to run  ·  Shift-↩ for newline", tint: .secondary)
+        }
+
+        // Locked to shell but text looks like a prompt: suggest the override.
+        if assistant.isModeLocked && assistant.mode == .shell && !draft.isEmpty {
+            let intent = InputIntentDetector.detect(draft)
             if intent == .agent {
                 return ContextHint(
-                    text: "Looks like a prompt — ⌘↩ to send to Agent",
-                    icon: "sparkles", tint: .purple,
-                    actionLabel: "Use Agent", onAction: { assistant.mode = .claudeAgent }
+                    text: "Locked to shell — ⌘↩ to override once",
+                    icon: "lock.fill", tint: .orange,
+                    actionLabel: "Unlock", onAction: { assistant.isModeLocked = false }
                 )
             }
             return ContextHint(text: "↩ to run  ·  Shift-↩ for newline", tint: .secondary)
         }
         switch assistant.mode {
         case .shell:
-            let hasHistory = !commandBlocks.isEmpty || !assistant.interactions.isEmpty
             // Slash command hint when user types /
             if draft.hasPrefix("/") {
                 return ContextHint(
@@ -645,7 +667,9 @@ private struct ComposeCommandBarView: View {
                 )
             }
             return ContextHint(
-                text: hasHistory ? "⌘↩ new agent  ·  ↑ expand history" : "⌘↩ to start an agent session",
+                text: assistant.isModeLocked
+                    ? "↩ to run  ·  ⌘↩ for agent"
+                    : "↩ routes smartly  ·  shell or agent",
                 tint: .secondary
             )
         case .ollamaCommand:
@@ -667,24 +691,54 @@ private struct ComposeCommandBarView: View {
     // MARK: - Mode Selector
 
     private var modeSelectorButton: some View {
-        Menu {
+        let displayed = assistant.effectiveMode(for: assistant.draftText)
+        let isLocked = assistant.isModeLocked
+        let empty = assistant.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return Menu {
             ForEach(selectableComposeModes) { mode in
-                Button { assistant.mode = mode } label: {
-                    Label(mode.displayName, systemImage: modeIcon(mode))
+                Button {
+                    assistant.mode = mode
+                    assistant.isModeLocked = true
+                    if mode.isAgentMode { assistant.lastAgentMode = mode }
+                } label: {
+                    Label("Lock to \(mode.displayName)", systemImage: modeIcon(mode))
                 }
             }
+            Divider()
+            Button {
+                assistant.isModeLocked = false
+            } label: {
+                Label(isLocked ? "Unlock (auto-detect)" : "Auto-detect (current)", systemImage: "wand.and.rays")
+            }
         } label: {
-            Image(systemName: modeIcon(assistant.mode))
-                .font(.system(size: 14))
-                .foregroundStyle(assistant.mode.isAgentMode ? Color.purple : Color.secondary)
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(
-                    assistant.mode.isAgentMode ? Color.purple.opacity(0.12) : Color.white.opacity(0.06)
-                ))
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: modeIcon(displayed))
+                    .font(.system(size: 14))
+                    .foregroundStyle(chipTint(for: displayed, empty: empty))
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(
+                        displayed.isAgentMode ? Color.purple.opacity(0.12) : Color.white.opacity(0.06)
+                    ))
+                if isLocked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(.orange)
+                        .padding(1)
+                        .background(Circle().fill(Color.black.opacity(0.6)))
+                        .offset(x: 2, y: 2)
+                }
+            }
         }
         .menuStyle(.borderlessButton)
         .frame(width: 28, height: 28)
-        .help("Switch input mode (\(assistant.mode.displayName))")
+        .help(isLocked
+              ? "Locked to \(assistant.mode.displayName) — click to change"
+              : "Auto-detect: \(displayed.displayName) — click to lock")
+    }
+
+    private func chipTint(for mode: ComposeAssistantMode, empty: Bool) -> Color {
+        if empty { return .secondary.opacity(0.5) }
+        return mode.isAgentMode ? .purple : .green
     }
 
     private var selectableComposeModes: [ComposeAssistantMode] {

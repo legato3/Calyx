@@ -250,21 +250,71 @@ final class ComposeAssistantState {
         }
     }
 
+    /// When true, Return + the mode chip strictly respect `mode`. When false
+    /// (default), `effectiveMode(for:)` picks shell vs agent from what the user
+    /// is typing, in real time.
+    var isModeLocked: Bool {
+        didSet {
+            UserDefaults.standard.set(isModeLocked, forKey: AppStorageKeys.composeModeLocked)
+        }
+    }
+
+    /// Preferred agent backend used when auto-routing detects an agent prompt.
+    var lastAgentMode: ComposeAssistantMode {
+        didSet {
+            UserDefaults.standard.set(lastAgentMode.rawValue, forKey: AppStorageKeys.composeLastAgentMode)
+        }
+    }
+
     var draftText: String = ""
     var interactions: [ComposeAssistantEntry] = []
     /// Called whenever draftText changes — used by CTermWindowController to drive next-command prediction.
     var onDraftTextChanged: ((String) -> Void)?
 
+    /// Transient: set to `true` right after an auto-routed agent dispatch, so
+    /// the compose bar can show a one-shot "sent to agent" hint. Consumer
+    /// resets this after acknowledging.
+    var showAutoRouteHint: Bool = false
+
     init() {
         let raw = UserDefaults.standard.string(forKey: AppStorageKeys.composeAssistantMode) ?? ComposeAssistantMode.shell.rawValue
+        let resolvedMode: ComposeAssistantMode
         if raw == ComposeAssistantMode.ollamaAgent.rawValue {
-            self.mode = .claudeAgent
+            resolvedMode = .claudeAgent
         } else {
-            self.mode = ComposeAssistantMode(rawValue: raw) ?? .shell
+            resolvedMode = ComposeAssistantMode(rawValue: raw) ?? .shell
+        }
+        self.mode = resolvedMode
+        // Default unlocked (smart per-prompt). Users who previously lived with
+        // a non-shell sticky mode get migrated to locked so their preference
+        // still holds on first launch.
+        if UserDefaults.standard.object(forKey: AppStorageKeys.composeModeLocked) == nil {
+            self.isModeLocked = (resolvedMode != .shell)
+        } else {
+            self.isModeLocked = UserDefaults.standard.bool(forKey: AppStorageKeys.composeModeLocked)
+        }
+        let lastAgentRaw = UserDefaults.standard.string(forKey: AppStorageKeys.composeLastAgentMode)
+        if let lastAgentRaw, let parsed = ComposeAssistantMode(rawValue: lastAgentRaw), parsed.isAgentMode {
+            self.lastAgentMode = (parsed == .ollamaAgent) ? .claudeAgent : parsed
+        } else {
+            self.lastAgentMode = .claudeAgent
         }
     }
 
-    var placeholderText: String { mode.placeholderText }
+    /// The mode dispatch should actually use for the current draft text.
+    /// When locked, just returns `mode`. When unlocked, consults
+    /// InputIntentDetector and routes agent-like text to `lastAgentMode`.
+    func effectiveMode(for draftText: String) -> ComposeAssistantMode {
+        if isModeLocked { return mode }
+        let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .shell }
+        switch InputIntentDetector.detect(trimmed) {
+        case .shell, .ambiguous: return .shell
+        case .agent:             return lastAgentMode
+        }
+    }
+
+    var placeholderText: String { effectiveMode(for: draftText).placeholderText }
     var isBusy: Bool { interactions.contains(where: { $0.status == .pending }) }
 
     /// Auto-detected intent for the current draft text (only meaningful in shell mode).
