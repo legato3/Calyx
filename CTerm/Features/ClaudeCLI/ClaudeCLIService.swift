@@ -263,9 +263,33 @@ enum ClaudeCLIService {
                 process.standardOutput = stdout
                 process.standardError = stderr
 
+                // Drain pipes concurrently as data arrives. If we only read after
+                // waitUntilExit(), a child that writes more than the pipe buffer
+                // (~64KB) blocks on write and never exits — a classic deadlock.
+                let stdoutLock = NSLock()
+                let stderrLock = NSLock()
+                nonisolated(unsafe) var stdoutBuffer = Data()
+                nonisolated(unsafe) var stderrBuffer = Data()
+                stdout.fileHandleForReading.readabilityHandler = { handle in
+                    let chunk = handle.availableData
+                    guard !chunk.isEmpty else { return }
+                    stdoutLock.lock()
+                    stdoutBuffer.append(chunk)
+                    stdoutLock.unlock()
+                }
+                stderr.fileHandleForReading.readabilityHandler = { handle in
+                    let chunk = handle.availableData
+                    guard !chunk.isEmpty else { return }
+                    stderrLock.lock()
+                    stderrBuffer.append(chunk)
+                    stderrLock.unlock()
+                }
+
                 do {
                     try process.run()
                 } catch {
+                    stdout.fileHandleForReading.readabilityHandler = nil
+                    stderr.fileHandleForReading.readabilityHandler = nil
                     continuation.resume(throwing: ClaudeCLIServiceError.launchFailed("Failed to launch Claude CLI: \(error.localizedDescription)"))
                     return
                 }
@@ -280,8 +304,23 @@ enum ClaudeCLIService {
                 process.waitUntilExit()
                 timeoutItem.cancel()
 
-                let stdoutText = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                let stderrText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                // Drain any data that arrived between the final readabilityHandler
+                // callback and exit, then detach the handlers.
+                let remainingStdout = stdout.fileHandleForReading.readDataToEndOfFile()
+                let remainingStderr = stderr.fileHandleForReading.readDataToEndOfFile()
+                stdout.fileHandleForReading.readabilityHandler = nil
+                stderr.fileHandleForReading.readabilityHandler = nil
+                stdoutLock.lock()
+                stdoutBuffer.append(remainingStdout)
+                let stdoutData = stdoutBuffer
+                stdoutLock.unlock()
+                stderrLock.lock()
+                stderrBuffer.append(remainingStderr)
+                let stderrData = stderrBuffer
+                stderrLock.unlock()
+
+                let stdoutText = String(data: stdoutData, encoding: .utf8) ?? ""
+                let stderrText = String(data: stderrData, encoding: .utf8) ?? ""
 
                 if process.terminationReason == .uncaughtSignal {
                     continuation.resume(throwing: ClaudeCLIServiceError.timedOut)

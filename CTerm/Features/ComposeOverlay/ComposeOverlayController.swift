@@ -246,7 +246,63 @@ final class ComposeOverlayController {
         activeTab.recordOllamaAgentObservation(observationText(for: block))
         onStateChanged?()
 
+        // Trivial-goal short-circuit: if this is the session's very first
+        // command and it succeeded with output, skip the second Claude round-trip
+        // (which is expensive for a simple "what is X" goal) and complete
+        // directly using the command output as the summary.
+        if let session = activeTab.ollamaAgentSession,
+           shouldShortCircuitAfterFirstSuccess(session: session, block: block) {
+            let summary = summaryText(forFirstSuccess: block)
+            activeTab.completeOllamaAgent(summary: summary)
+            agentTargetController = nil
+            agentSendEnterKey = nil
+            onStateChanged?()
+            return
+        }
+
         planNextAgentStep(for: activeTab)
+    }
+
+    /// True when the session has executed exactly one command that exited 0
+    /// with non-empty output AND the user's goal is short enough that one
+    /// command is almost certainly the entire answer. Used to avoid spending
+    /// a second Claude CLI round-trip just to hear "done".
+    private func shouldShortCircuitAfterFirstSuccess(
+        session: AgentSession,
+        block: TerminalCommandBlock
+    ) -> Bool {
+        guard block.exitCode == 0 else { return false }
+        guard let snippet = block.primarySnippet,
+              !snippet.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return false }
+
+        // Only short-circuit on the first completed command of the session.
+        let commandCount = session.inlineSteps.filter { $0.kind == .command }.count
+        guard commandCount == 1 else { return false }
+
+        // Keep this conservative: only for short goals where a single command
+        // is very likely to be the whole answer (e.g. "what is the time",
+        // "show branch", "list files").
+        let words = session.intent
+            .split(whereSeparator: { $0.isWhitespace })
+            .count
+        return words <= 8
+    }
+
+    private func summaryText(forFirstSuccess block: TerminalCommandBlock) -> String {
+        let snippet = (block.primarySnippet ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let command = block.titleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if snippet.isEmpty {
+            return "Ran `\(command)` — see output above."
+        }
+        // Keep the summary compact; the full output is already visible in the
+        // terminal block above the run panel.
+        let lines = snippet.split(separator: "\n", omittingEmptySubsequences: false)
+        if lines.count == 1 {
+            return String(lines[0]).trimmingCharacters(in: .whitespaces)
+        }
+        return "Ran `\(command)`. Output:\n\(snippet)"
     }
 
     func explainEntry(
