@@ -37,7 +37,10 @@ struct AgentRunPanelRegion: View {
                         onStop: onStop,
                         onApprove: onApprove,
                         onDeny: onDeny,
-                        onDismiss: onDismiss
+                        onDismiss: onDismiss,
+                        onApproveSafe: { approveSafe(in: session) },
+                        onApproveStep: { approveStep(id: $0, in: session) },
+                        onSkipStep: { skipStep(id: $0, in: session) }
                     )
                 }
             } else {
@@ -59,6 +62,42 @@ struct AgentRunPanelRegion: View {
             return inline
         }
         return AgentSessionRegistry.shared.activeSession(forTab: tab.id)
+    }
+
+    // MARK: - Per-step approval
+
+    private func approveStep(id: UUID, in session: AgentSession) {
+        guard let plan = session.plan, let idx = plan.steps.firstIndex(where: { $0.id == id }) else { return }
+        if plan.steps[idx].status == .pending {
+            plan.steps[idx].status = .approved
+        }
+        maybeStartExecuting(plan: plan)
+    }
+
+    private func skipStep(id: UUID, in session: AgentSession) {
+        guard let plan = session.plan, let idx = plan.steps.firstIndex(where: { $0.id == id }) else { return }
+        if plan.steps[idx].status == .pending || plan.steps[idx].status == .approved {
+            plan.steps[idx].status = .skipped
+        }
+        maybeStartExecuting(plan: plan)
+    }
+
+    private func approveSafe(in session: AgentSession) {
+        guard let plan = session.plan else { return }
+        for i in plan.steps.indices
+            where plan.steps[i].status == .pending && !plan.steps[i].willAsk {
+            plan.steps[i].status = .approved
+        }
+        maybeStartExecuting(plan: plan)
+    }
+
+    /// If every step has been resolved (approved/skipped/terminal) and the plan
+    /// is still in ready state, flip it to executing so ExecutionCoordinator picks up.
+    private func maybeStartExecuting(plan: AgentPlan) {
+        let anyPending = plan.steps.contains { $0.status == .pending }
+        if !anyPending && plan.status == .ready {
+            plan.status = .executing
+        }
     }
 
     // MARK: - Timer

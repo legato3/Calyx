@@ -58,7 +58,9 @@ enum PlanBuilder {
             steps = await buildBrowserResearchPlan(session.userIntent, pwd: pwd)
         }
 
-        session.planSteps = steps
+        // Tag willAsk per step by running a lightweight gate simulation.
+        // Kind is inferred by AgentPlanStep's initializer from the command prefix.
+        session.planSteps = assessWillAsk(steps, pwd: pwd)
         session.approvalRequirement = intent.defaultApproval
 
         if steps.isEmpty {
@@ -276,6 +278,55 @@ enum PlanBuilder {
             }
         }
         return steps
+    }
+
+    // MARK: - Will-Ask Pre-Assessment
+
+    /// Runs a lightweight dry-run of ApprovalGate so the stepper can flag
+    /// risky rows before the user approves the plan. Peer/manual steps never
+    /// ask; shell/browser steps consult RiskScorer + HardStopGuard + trust mode.
+    @MainActor
+    private static func assessWillAsk(_ steps: [AgentPlanStep], pwd: String?) -> [AgentPlanStep] {
+        steps.map { step in
+            guard let command = step.command, !command.isEmpty else { return step }
+            var s = step
+            switch step.kind {
+            case .shell:
+                s.willAsk = shellWillAsk(command: command, pwd: pwd)
+            case .browser:
+                s.willAsk = browserWillAsk(command: command)
+            case .peer, .manual:
+                s.willAsk = false
+            }
+            return s
+        }
+    }
+
+    @MainActor
+    private static func shellWillAsk(command: String, pwd: String?) -> Bool {
+        if HardStopGuard.isHardStop(command, gitBranch: nil) != nil { return true }
+        let assessment = RiskScorer.assess(command: command, pwd: pwd, gitBranch: nil)
+        switch AgentPermissionsStore.shared.decide(for: assessment) {
+        case .autoApprove:     return false
+        case .requireApproval: return true
+        case .blocked:         return true
+        }
+    }
+
+    @MainActor
+    private static func browserWillAsk(command: String) -> Bool {
+        // Mirror ExecutionCoordinator.browserRiskScore heuristic.
+        let lower = command.lowercased()
+        let score: Int
+        if lower.contains("eval") { score = 45 }
+        else if lower.contains("click") || lower.contains("fill") || lower.contains("type")
+            || lower.contains("press") || lower.contains("check") || lower.contains("select") {
+            score = 25
+        } else { score = 10 }
+        switch AgentPermissionsStore.shared.trustMode {
+        case .askMe:        return score >= 20
+        case .trustSession: return score >= 80
+        }
     }
 
     private static func extractURL(from input: String) -> String? {

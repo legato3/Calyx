@@ -244,35 +244,18 @@ final class ExecutionCoordinator {
     // MARK: - Strategy Selection
 
     private func chooseStrategy(for step: AgentPlanStep) -> ExecutionStrategy {
-        guard let command = step.command, !command.isEmpty else {
+        switch step.kind {
+        case .manual:
             return .informational
-        }
-
-        let lower = command.lowercased()
-
-        // Peer delegation
-        if lower.hasPrefix("@") || lower.contains("send_message") || lower.contains("delegate:") {
+        case .peer:
             return .peerDelegation
+        case .browser:
+            return session.classifiedIntent == .browserResearch
+                ? .browserResearch
+                : .browserAction
+        case .shell:
+            return .localShell
         }
-
-        // Browser actions
-        if lower.hasPrefix("browse:") || lower.hasPrefix("browser:") {
-            // If the session is classified as browserResearch and this is the first
-            // browser step, use the full research workflow to batch all browser steps
-            if session.classifiedIntent == .browserResearch {
-                return .browserResearch
-            }
-            return .browserAction
-        }
-        // URL opening
-        if lower.hasPrefix("open http") || lower.hasPrefix("open https") {
-            if session.classifiedIntent == .browserResearch {
-                return .browserResearch
-            }
-            return .browserAction
-        }
-
-        return .localShell
     }
 
     // MARK: - Local Shell Execution

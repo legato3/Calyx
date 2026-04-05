@@ -78,6 +78,17 @@ final class AgentPlanStore {
         if plan.status == .ready { plan.status = .executing }
     }
 
+    /// Approve only the pending steps flagged as !willAsk. The risky ones stay
+    /// pending so the user can answer them individually.
+    func approveSafeSteps() {
+        guard let plan = activePlan else { return }
+        for i in plan.steps.indices
+            where plan.steps[i].status == .pending && !plan.steps[i].willAsk {
+            plan.steps[i].status = .approved
+        }
+        if plan.status == .ready { plan.status = .executing }
+    }
+
     func skipStep(id: UUID) {
         guard let plan = activePlan,
               let idx = plan.steps.firstIndex(where: { $0.id == id }),

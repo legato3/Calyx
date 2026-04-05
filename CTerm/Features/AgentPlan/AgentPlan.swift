@@ -17,6 +17,12 @@ struct AgentPlanStep: Identifiable, Sendable {
     var status: StepStatus
     var output: String?
     var durationMs: Int?
+    /// Authoritative dispatch kind (shell / browser / peer / manual).
+    /// Set by PlanBuilder; defaults to .shell for back-compat.
+    var kind: StepKind
+    /// Pre-computed hint: will ApprovalGate prompt the user when this step
+    /// reaches dispatch? Used by the run panel to flag risky rows up front.
+    var willAsk: Bool
 
     enum StepStatus: String, Sendable {
         case pending
@@ -56,11 +62,13 @@ struct AgentPlanStep: Identifiable, Sendable {
         }
     }
 
-    init(title: String, command: String? = nil) {
+    init(title: String, command: String? = nil, kind: StepKind? = nil, willAsk: Bool = false) {
         self.id = UUID()
         self.title = title
         self.command = command
         self.status = .pending
+        self.kind = kind ?? StepKind.infer(from: command)
+        self.willAsk = willAsk
     }
 }
 

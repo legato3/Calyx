@@ -14,6 +14,9 @@ struct AgentRunPanelView: View {
     var onApprove: () -> Void
     var onDeny: () -> Void
     var onDismiss: () -> Void
+    var onApproveSafe: (() -> Void)? = nil
+    var onApproveStep: ((UUID) -> Void)? = nil
+    var onSkipStep: ((UUID) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -21,7 +24,12 @@ struct AgentRunPanelView: View {
             statusLine
             if let plan = session.plan, !plan.steps.isEmpty {
                 Divider()
-                AgentRunPlanStepper(steps: plan.steps)
+                AgentRunPlanStepper(
+                    steps: plan.steps,
+                    awaitingApproval: session.phase == .awaitingApproval,
+                    onApproveStep: onApproveStep,
+                    onSkipStep: onSkipStep
+                )
             }
             if session.phase == .awaitingApproval, let command = session.pendingCommand {
                 Divider()
@@ -150,6 +158,16 @@ struct AgentRunPanelView: View {
         }
     }
 
+    /// True when the plan has at least one safe pending step + at least one risky one,
+    /// so the "Approve Safe" shortcut is meaningful.
+    private var hasSafeSteps: Bool {
+        guard let steps = session.plan?.steps else { return false }
+        let pending = steps.filter { $0.status == .pending }
+        let safe = pending.filter { !$0.willAsk }
+        let risky = pending.filter { $0.willAsk }
+        return !safe.isEmpty && !risky.isEmpty
+    }
+
     private var lastObservation: String? {
         let artifactText = session.artifacts
             .last(where: { $0.kind == .commandOutput })?
@@ -207,7 +225,12 @@ struct AgentRunPanelView: View {
                 Button("Deny") { onDeny() }
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
-                Button("Approve") { onApprove() }
+                if hasSafeSteps, let onApproveSafe {
+                    Button("Approve Safe") { onApproveSafe() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                }
+                Button("Approve All") { onApprove() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.mini)
                     .tint(.orange)
