@@ -95,7 +95,8 @@ enum PlanBuilder {
         }
 
         if steps.isEmpty {
-            steps.append(AgentPlanStep(title: "Inspect: \(input.prefix(60))", command: "git status && ls -la"))
+            steps.append(AgentPlanStep(title: "Check git status", command: "git status"))
+            steps.append(AgentPlanStep(title: "List directory", command: "ls -la"))
         }
 
         return steps

@@ -24,6 +24,14 @@ final class ApprovalPresenter: AgentSessionObserver {
     /// pwd at the moment of the approval request — needed for repo-scope grants.
     private(set) var pendingRepoPath: String?
 
+    /// Queued approval requests that arrived while one was already being shown.
+    private struct QueuedApproval {
+        let session: AgentSession
+        let context: ApprovalContext
+        let repoPath: String?
+    }
+    private var approvalQueue: [QueuedApproval] = []
+
     private var watchedSessionIDs: Set<UUID> = []
     private var pollTimer: Timer?
 
@@ -61,18 +69,35 @@ final class ApprovalPresenter: AgentSessionObserver {
 
     /// Set before calling `session.requestApproval(...)` so the presenter knows
     /// which repo path to associate with repo-scoped grants.
+    /// Only affects the currently-shown approval; queued approvals capture their
+    /// own repo path at the time they are enqueued.
     func setRepoPath(_ path: String?) {
-        pendingRepoPath = path
+        if pendingSession != nil {
+            pendingRepoPath = path
+        } else {
+            // Store for the next approval that arrives (existing behaviour).
+            pendingRepoPath = path
+        }
     }
 
     // MARK: - AgentSessionObserver
 
     func session(_ session: AgentSession, didRequestApproval context: ApprovalContext) {
-        // Attribution happens at request time, so the current `pendingRepoPath`
-        // applies to this context.
+        // If another approval is already being shown, queue this one instead of
+        // overwriting — otherwise the first session's callback is silently lost.
+        if pendingSession != nil {
+            approvalQueue.append(QueuedApproval(session: session, context: context, repoPath: pendingRepoPath))
+            logger.info("Approval queued (presenter busy): session=\(session.id.uuidString.prefix(8))")
+            return
+        }
+        showApproval(session: session, context: context, repoPath: pendingRepoPath)
+    }
+
+    private func showApproval(session: AgentSession, context: ApprovalContext, repoPath: String?) {
         pendingSession = session
         pendingContext = context
         pendingHardStop = nil  // hard-stop flag is set via `present(hardStop:)`
+        pendingRepoPath = repoPath
         logger.info("Approval requested: session=\(session.id.uuidString.prefix(8)) score=\(context.riskScore)")
     }
 
@@ -89,12 +114,16 @@ final class ApprovalPresenter: AgentSessionObserver {
     func resolve(answer: ApprovalAnswer, scope: ApprovalScope) {
         guard let session = pendingSession, let context = pendingContext else { return }
 
-        if answer == .approved, pendingHardStop == nil, scope != .once {
+        // Hard-stop approvals are always treated as once-only — never grant
+        // broader scope on a destructive action regardless of what the UI passes.
+        let effectiveScope = pendingHardStop != nil ? ApprovalScope.once : scope
+
+        if answer == .approved, pendingHardStop == nil, effectiveScope != .once {
             let key = keyFrom(context: context)
             let grantContext = GrantContext(sessionID: session.id, pwd: pendingRepoPath)
             AgentGrantStore.shared.record(
                 key: key,
-                scope: scope,
+                scope: effectiveScope,
                 context: grantContext,
                 repoPath: pendingRepoPath
             )
@@ -102,7 +131,7 @@ final class ApprovalPresenter: AgentSessionObserver {
 
         let resume = session.onApprovalResolved
 
-        session.resolveApproval(decision: answer, scope: scope)
+        session.resolveApproval(decision: answer, scope: effectiveScope)
         session.clearApproval()
 
         pendingSession = nil
@@ -111,6 +140,18 @@ final class ApprovalPresenter: AgentSessionObserver {
         pendingRepoPath = nil
 
         resume?(answer)
+
+        // Show the next queued approval, if any.
+        if let next = approvalQueue.first {
+            approvalQueue.removeFirst()
+            // Skip approvals for sessions that have already terminated.
+            if !next.session.phase.isTerminal {
+                showApproval(session: next.session, context: next.context, repoPath: next.repoPath)
+            } else if !approvalQueue.isEmpty {
+                let following = approvalQueue.removeFirst()
+                showApproval(session: following.session, context: following.context, repoPath: following.repoPath)
+            }
+        }
     }
 
     /// Cancel without a grant — also resumes the driver so it can move on.

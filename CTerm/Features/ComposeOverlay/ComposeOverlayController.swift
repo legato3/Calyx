@@ -120,7 +120,8 @@ final class ComposeOverlayController {
         case .ollamaCommand:
             return generateSuggestion(
                 from: trimmed,
-                activeTab: activeTab
+                activeTab: activeTab,
+                focusedController: focusedController
             )
         case .ollamaAgent:
             let enrichedGoal = AgentPromptContextBuilder.buildPrompt(goal: trimmed, activeTab: activeTab)
@@ -210,6 +211,8 @@ final class ComposeOverlayController {
         guard let activeTab else { return }
         cancelAgentTask(for: activeTab.id)
         activeTab.stopOllamaAgent()
+        agentTargetController = nil
+        agentSendEnterKey = nil
         onStateChanged?()
     }
 
@@ -419,26 +422,77 @@ final class ComposeOverlayController {
 
     // MARK: - Internals
 
-    private func generateSuggestion(from prompt: String, activeTab: Tab?) -> Bool {
+    private func generateSuggestion(
+        from prompt: String,
+        activeTab: Tab?,
+        focusedController: GhosttySurfaceController?
+    ) -> Bool {
         let entryID = assistantState.beginEntry(kind: .commandSuggestion, prompt: prompt)
         let pwd = activeTab?.pwd
+        let terminalObservation = latestTerminalObservation(
+            activeTab: activeTab,
+            focusedController: focusedController
+        )
+        onStateChanged?()
 
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let response = try await OllamaCommandService.streamCommand(for: prompt, pwd: pwd) { [weak self] partial in
+                let response = try await OllamaCommandService.streamCommand(
+                    for: prompt,
+                    pwd: pwd,
+                    terminalObservation: terminalObservation
+                ) { [weak self] partial in
                     self?.assistantState.updatePendingEntry(
                         id: entryID,
                         response: partial,
                         command: partial
                     )
+                    self?.onStateChanged?()
                 }
                 self.assistantState.finishEntry(id: entryID, response: response, command: response)
+                self.onStateChanged?()
             } catch {
                 self.assistantState.failEntry(id: entryID, message: error.localizedDescription)
+                self.onStateChanged?()
             }
         }
         return true
+    }
+
+    private func latestTerminalObservation(
+        activeTab: Tab?,
+        focusedController: GhosttySurfaceController?
+    ) -> String? {
+        guard let activeTab else { return nil }
+
+        if let shellError = activeTab.lastShellError?.snippet,
+           !shellError.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Latest shell error:\n\(shellError)"
+        }
+
+        if let block = activeTab.latestCommandBlock {
+            var lines: [String] = []
+            lines.append("Latest command: \(block.titleText)")
+            if let exitCode = block.exitCode {
+                lines.append("Exit code: \(exitCode)")
+            }
+            if let snippet = block.primarySnippet,
+               !snippet.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.append("Latest output snippet:\n\(snippet)")
+            }
+            let combined = lines.joined(separator: "\n")
+            if !combined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return combined
+            }
+        }
+
+        if let viewport = readViewportSnippet(activeTab: activeTab, focusedController: focusedController),
+           !viewport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Current viewport snippet:\n\(viewport)"
+        }
+
+        return nil
     }
 
     private func startAgent(
@@ -512,6 +566,8 @@ final class ComposeOverlayController {
                 case .run:
                     guard let command = decision.command else {
                         activeTab.failOllamaAgent("Ollama returned a run action without a command.")
+                        self.agentTargetController = nil
+                        self.agentSendEnterKey = nil
                         return
                     }
                     // Auto-run if the command is safe and we still have a controller reference.
@@ -533,6 +589,8 @@ final class ComposeOverlayController {
                     }
                 case .done:
                     activeTab.completeOllamaAgent(summary: decision.message)
+                    self.agentTargetController = nil
+                    self.agentSendEnterKey = nil
                 case .browse:
                     // Browser actions are surfaced as observations for now;
                     // full browser-in-loop execution is wired through AgentPlanExecutor.
@@ -545,6 +603,8 @@ final class ComposeOverlayController {
             } catch {
                 guard activeTab.ollamaAgentSession?.id == sessionID else { return }
                 activeTab.failOllamaAgent(error.localizedDescription)
+                self.agentTargetController = nil
+                self.agentSendEnterKey = nil
             }
         }
     }

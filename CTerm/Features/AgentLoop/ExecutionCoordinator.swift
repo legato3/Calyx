@@ -32,6 +32,8 @@ final class ExecutionCoordinator {
     private let planStore: AgentPlanStore
     private var executionTask: Task<Void, Never>?
     private var currentStepStartTime: Date?
+    private var replanAttempts: Int = 0
+    private static let maxReplanAttempts = 3
 
     /// Callback when all steps are done (triggers summarization).
     var onAllStepsCompleted: (() -> Void)?
@@ -120,6 +122,8 @@ final class ExecutionCoordinator {
                 await self.attemptReplan(failedIndex: stepIndex, output: observation)
             }
         } else {
+            // Reset replan counter on success
+            replanAttempts = 0
             // Continue to next step after brief pause
             executionTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
@@ -144,9 +148,17 @@ final class ExecutionCoordinator {
             return
         }
 
+        // Guard against infinite replan loops
+        guard replanAttempts < Self.maxReplanAttempts else {
+            logger.warning("ExecutionCoordinator: replan limit (\(Self.maxReplanAttempts)) reached, stopping")
+            session.fail(message: "Replanning limit reached after repeated step failures.")
+            return
+        }
+        replanAttempts += 1
+
         if let replanCallback = onReplanNeeded {
             if let newSteps = await replanCallback(step, output) {
-                logger.info("ExecutionCoordinator: replanned \(newSteps.count) replacement step(s)")
+                logger.info("ExecutionCoordinator: replanned \(newSteps.count) replacement step(s) (attempt \(self.replanAttempts))")
 
                 // Replace remaining pending/approved steps with new ones
                 var updated = plan.steps.filter { $0.status.isTerminal }
@@ -336,16 +348,22 @@ final class ExecutionCoordinator {
         if let hardStop { ApprovalPresenter.shared.presentHardStop(reason: hardStop) }
 
         // Wire resume. Executor picks up after the user answers.
+        // Read session.plan inside the closure so we always operate on the
+        // current plan — not a stale capture from before a potential replan.
         session.onApprovalResolved = { [weak self] answer in
             guard let self else { return }
             self.session.onApprovalResolved = nil
+            guard let currentPlan = self.session.plan, index < currentPlan.steps.count else {
+                self.executeNextStep()
+                return
+            }
             if answer == .approved {
                 // Re-enter executeLocalShell; grant cache should now cover it.
-                plan.steps[index].status = .approved
+                currentPlan.steps[index].status = .approved
                 self.executeNextStep()
             } else {
-                plan.steps[index].status = .failed
-                plan.steps[index].output = "Denied by user"
+                currentPlan.steps[index].status = .failed
+                currentPlan.steps[index].output = "Denied by user"
                 self.executeNextStep()
             }
         }
@@ -477,26 +495,35 @@ final class ExecutionCoordinator {
                 }
             }
 
+            // Build a stable ID→planIndex map before the async call so we can
+            // write results back to the correct slots even if the plan mutates.
+            let browserStepIDs: [UUID] = Array(browserSteps).map { $0.id }
+
             let (findings, summary) = await workflow.execute(
                 goal: self.session.displayIntent,
                 steps: Array(browserSteps),
                 agentSession: self.session
             )
 
-            // Sync step statuses from the workflow back to the session
+            // Sync step statuses from the workflow back to the session.
+            // entry.stepIndex is relative to the browserSteps array, so map
+            // through the captured ID list rather than using a raw offset from
+            // `index` (which would be wrong when non-browser steps precede the
+            // first browser step in the slice).
             if let researchSession = workflow.activeSession {
                 for entry in researchSession.logEntries {
-                    let sessionStepIndex = index + entry.stepIndex
-                    guard sessionStepIndex < plan.steps.count else { continue }
+                    guard entry.stepIndex < browserStepIDs.count else { continue }
+                    let stepID = browserStepIDs[entry.stepIndex]
+                    guard let planIdx = plan.steps.firstIndex(where: { $0.id == stepID }) else { continue }
                     switch entry.status {
                     case .succeeded:
-                        plan.steps[sessionStepIndex].status = .succeeded
-                        plan.steps[sessionStepIndex].output = entry.output
+                        plan.steps[planIdx].status = .succeeded
+                        plan.steps[planIdx].output = entry.output
                     case .failed:
-                        plan.steps[sessionStepIndex].status = .failed
-                        plan.steps[sessionStepIndex].output = entry.output
+                        plan.steps[planIdx].status = .failed
+                        plan.steps[planIdx].output = entry.output
                     case .skipped:
-                        plan.steps[sessionStepIndex].status = .skipped
+                        plan.steps[planIdx].status = .skipped
                     case .running:
                         break
                     }

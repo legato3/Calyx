@@ -35,7 +35,10 @@ final class TaskExecutionCoordinator {
     private let agentCoordinator: AgentLoopCoordinator
     private let planStore: AgentPlanStore
     private var retryTasks: [UUID: Task<Void, Never>] = [:]
-    private var syncTask: Task<Void, Never>?
+    /// Per-task sync loops, keyed by task ID. Replaces the single `syncTask`
+    /// so foreground and background tasks each have their own loop and don't
+    /// cancel each other.
+    private var syncTasks: [UUID: Task<Void, Never>] = [:]
 
     init(agentCoordinator: AgentLoopCoordinator, planStore: AgentPlanStore) {
         self.agentCoordinator = agentCoordinator
@@ -93,8 +96,8 @@ final class TaskExecutionCoordinator {
         task.transitionTo(.paused)
         if task.id == activeTask?.id {
             // Freeze task/session mirroring without terminalizing the underlying run.
-            syncTask?.cancel()
-            syncTask = nil
+            syncTasks[task.id]?.cancel()
+            syncTasks.removeValue(forKey: task.id)
         }
     }
 
@@ -119,6 +122,8 @@ final class TaskExecutionCoordinator {
         guard task.phase.canCancel else { return }
         retryTasks[task.id]?.cancel()
         retryTasks.removeValue(forKey: task.id)
+        syncTasks[task.id]?.cancel()
+        syncTasks.removeValue(forKey: task.id)
 
         if task.id == activeTask?.id {
             agentCoordinator.stopSession()
@@ -270,8 +275,8 @@ final class TaskExecutionCoordinator {
 
     /// Continuously sync agent session state into the managed task.
     private func startSessionSync(for task: ManagedTask) {
-        syncTask?.cancel()
-        syncTask = Task { @MainActor [weak self] in
+        syncTasks[task.id]?.cancel()
+        syncTasks[task.id] = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 self.syncTaskFromSession(task)
@@ -314,24 +319,22 @@ final class TaskExecutionCoordinator {
         case .completed:
             task.summary = session.summary
             task.nextActions = session.nextActions
-            if task.phase == .paused {
-                task.transitionTo(.summarizing)
-            } else if task.phase != .summarizing {
+            if task.phase != .summarizing {
                 task.transitionTo(.summarizing)
             }
             task.transitionTo(.completed)
         case .failed:
             task.fail(message: session.errorMessage ?? "Agent session failed")
         case .cancelled:
-            task.fail(message: "Agent session cancelled")
+            task.cancel()
         case .idle:
             break
         }
     }
 
     private func onTaskCompleted(_ task: ManagedTask) {
-        syncTask?.cancel()
-        syncTask = nil
+        syncTasks[task.id]?.cancel()
+        syncTasks.removeValue(forKey: task.id)
 
         if task.id == activeTask?.id {
             activeTask = nil

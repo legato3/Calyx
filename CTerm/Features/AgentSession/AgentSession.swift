@@ -208,7 +208,6 @@ final class AgentSession: Identifiable {
 
     func complete(with result: AgentResult) {
         self.result = result
-        phase = .summarizing
         phase = .completed
         notifyCompleted(result)
     }
