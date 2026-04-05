@@ -1,8 +1,8 @@
 // AgentRunPanelStrip.swift
 // CTerm
 //
-// Collapsed form of the agent run panel. Thin horizontal strip showing phase
-// badge, progress bar, and an expand chevron. Tap to expand into the card.
+// Collapsed form: a single subtle chip showing phase icon + label.
+// Matches Warp's "✓ Tool Name" style in the tab bar.
 
 import SwiftUI
 
@@ -12,69 +12,79 @@ struct AgentRunPanelStrip: View {
     var onStop: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            phaseBadge
-            progressLabel
-            if !(session.plan?.steps.isEmpty ?? true) && session.phase.isActive {
-                ProgressView(value: session.progress)
-                    .progressViewStyle(.linear)
-                    .frame(width: 60)
-                    .tint(.accentColor)
-            }
-            Spacer(minLength: 8)
-            if !session.phase.isTerminal {
-                Button(action: onStop) {
-                    Image(systemName: "stop.fill")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.white)
-                        .frame(width: 16, height: 16)
-                        .background(Circle().fill(.red))
-                }
-                .buttonStyle(.plain)
-            }
+        HStack(spacing: 0) {
             Button(action: onExpand) {
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20, height: 20)
-                    .contentShape(Rectangle())
+                HStack(spacing: 5) {
+                    phaseIcon
+                    Text(chipLabel)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(phaseColor)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 260, alignment: .leading)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(phaseColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
+
+            if !session.phase.isTerminal {
+                Button(action: onStop) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 2)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(.ultraThinMaterial)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onExpand)
     }
 
-    private var phaseBadge: some View {
-        HStack(spacing: 4) {
-            if session.phase.isActive {
-                ProgressView().controlSize(.mini)
-            } else if session.phase == .completed {
-                Image(systemName: "checkmark.circle.fill").font(.system(size: 10)).foregroundStyle(.green)
-            } else if session.phase == .failed {
-                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10)).foregroundStyle(.red)
-            } else if session.phase == .awaitingApproval {
-                Image(systemName: "hand.raised.fill").font(.system(size: 10)).foregroundStyle(.orange)
-            }
-            Text(session.phase.userLabel)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(color(for: session.phase))
+    @ViewBuilder
+    private var phaseIcon: some View {
+        if session.phase.isActive {
+            ProgressView()
+                .controlSize(.mini)
+                .frame(width: 12, height: 12)
+        } else if session.phase == .completed {
+            Image(systemName: "checkmark")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.green)
+        } else if session.phase == .failed {
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.red)
+        } else if session.phase == .awaitingApproval {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(.orange)
+        } else {
+            Image(systemName: "circle")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
         }
     }
 
-    private var progressLabel: some View {
-        Text(session.progressLabel.prefix(50))
-            .font(.system(size: 10, design: .rounded))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
+    private var chipLabel: String {
+        let intent = session.intent.prefix(60)
+        switch session.phase {
+        case .completed:        return "✓ \(intent)"
+        case .failed:           return "✗ \(intent)"
+        case .cancelled:        return "\(intent)"
+        case .awaitingApproval: return "Approve: \(intent)"
+        default:                return String(intent)
+        }
     }
 
-    private func color(for phase: AgentPhase) -> Color {
-        switch phase {
+    private var phaseColor: Color {
+        switch session.phase {
         case .idle:             return .secondary
         case .thinking:         return .blue
         case .awaitingApproval: return .orange

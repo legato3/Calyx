@@ -200,6 +200,7 @@ struct MainContentView: View {
                                             shellError: activeTab?.lastShellError,
                                             ollamaModel: ollamaModel,
                                             ollamaEndpoint: ollamaEndpoint,
+                                            ollamaSuggestionBehavior: ollamaSuggestionBehavior,
                                             broadcastEnabled: actions.composeBroadcastEnabled,
                                             isExpanded: windowSession.showComposeOverlay,
                                             pwd: activeTab?.pwd,
@@ -400,6 +401,7 @@ private struct ComposeCommandBarView: View {
     let shellError: ShellErrorEvent?
     let ollamaModel: String
     let ollamaEndpoint: String
+    let ollamaSuggestionBehavior: String
     let broadcastEnabled: Bool
     let isExpanded: Bool
     let pwd: String?

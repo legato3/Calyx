@@ -1,10 +1,8 @@
 // AgentInputBar.swift
 // CTerm
 //
-// Always-visible thin input bar at the bottom of the terminal area.
-// Provides a natural-language-first entry point for agent interactions
-// without requiring ⌘K to open the full compose overlay.
-// Shows ActiveAI suggestion chips inline as pill buttons.
+// Warp-style minimal input bar at the bottom of the terminal area.
+// Clean text field with a placeholder, send button, and suggestion chips above.
 
 import SwiftUI
 
@@ -17,77 +15,64 @@ struct AgentInputBar: View {
     var onSuggestionTapped: (ActiveAISuggestion) -> Void
     var onExpandCompose: () -> Void
 
-    @State private var isFocused = false
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            // Suggestion chips
             if !suggestions.isEmpty && !isAgentRunning {
                 suggestionChips
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            // Plan view (inline when active)
-            if let store = planStore, let plan = store.activePlan, !plan.status.isTerminal {
-                AgentPlanView(
-                    plan: plan,
-                    onApproveStep: { id in store.approveStep(id: id) },
-                    onApproveAll: { store.approveAllPending() },
-                    onSkipStep: { id in store.skipStep(id: id) },
-                    onStop: { store.stopPlan() }
-                )
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
-            // Input row
-            HStack(spacing: 8) {
-                Image(systemName: isAgentRunning ? "sparkles" : "terminal")
-                    .font(.system(size: 12))
-                    .foregroundStyle(isAgentRunning ? .blue : .secondary)
-                    .symbolEffect(.pulse, isActive: isAgentRunning)
-
-                TextField("Ask CTerm anything…", text: $text)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .focused($fieldFocused)
-                    .onSubmit {
-                        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !trimmed.isEmpty else { return }
-                        onSubmit(trimmed)
-                        text = ""
-                    }
-
-                if !text.isEmpty {
-                    Button {
-                        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !trimmed.isEmpty else { return }
-                        onSubmit(trimmed)
-                        text = ""
-                    } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.blue)
-                    }
-                    .buttonStyle(.borderless)
-                }
-
-                Button {
-                    onExpandCompose()
-                } label: {
-                    Image(systemName: "rectangle.expand.vertical")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.borderless)
-                .help("Open full compose overlay (⌘K)")
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            inputRow
         }
         .background(.ultraThinMaterial)
     }
 
-    @ViewBuilder
+    // MARK: - Input row
+
+    private var inputRow: some View {
+        HStack(spacing: 10) {
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .focused($fieldFocused)
+                .foregroundStyle(.primary)
+                .onSubmit(submit)
+
+            if isAgentRunning {
+                ProgressView()
+                    .controlSize(.mini)
+                    .transition(.opacity)
+            } else if !text.isEmpty {
+                Button(action: submit) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.blue)
+                }
+                .buttonStyle(.borderless)
+                .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .animation(.easeInOut(duration: 0.15), value: isAgentRunning)
+        .animation(.easeInOut(duration: 0.1), value: text.isEmpty)
+    }
+
+    private var placeholder: String {
+        isAgentRunning ? "Agent is running…" : "Ask CTerm anything…"
+    }
+
+    private func submit() {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        onSubmit(trimmed)
+        text = ""
+    }
+
+    // MARK: - Suggestion chips
+
     private var suggestionChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
@@ -110,18 +95,18 @@ struct AgentInputBar: View {
                     .buttonStyle(.borderless)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 5)
         }
     }
 
     private func chipBackground(for kind: ActiveAISuggestion.Kind) -> some ShapeStyle {
         switch kind {
-        case .fix:           return AnyShapeStyle(.red.opacity(0.1))
-        case .explain:       return AnyShapeStyle(.blue.opacity(0.1))
-        case .nextStep:      return AnyShapeStyle(.green.opacity(0.1))
-        case .continueAgent: return AnyShapeStyle(.purple.opacity(0.1))
-        case .custom:        return AnyShapeStyle(.secondary.opacity(0.1))
+        case .fix:           return AnyShapeStyle(Color.red.opacity(0.1))
+        case .explain:       return AnyShapeStyle(Color.blue.opacity(0.1))
+        case .nextStep:      return AnyShapeStyle(Color.green.opacity(0.1))
+        case .continueAgent: return AnyShapeStyle(Color.purple.opacity(0.1))
+        case .custom:        return AnyShapeStyle(Color.secondary.opacity(0.1))
         }
     }
 }

@@ -5,7 +5,7 @@
 
 import Foundation
 
-struct BrowserToolResult: Sendable {
+struct BrowserToolResult: Sendable, Error {
     let text: String
     let isError: Bool
 }
