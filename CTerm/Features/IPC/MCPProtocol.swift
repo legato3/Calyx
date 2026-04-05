@@ -734,6 +734,15 @@ struct MCPRouter: Sendable {
                     ]
                 )
             ),
+            MCPTool(
+                name: "get_agent_environment",
+                description: "Get a full self-orientation snapshot: which pane you are running in (tab_id, pane_id, pwd), MCP server connection details, browser server status, active peers, a capabilities manifest (what CTerm features are available), and a lightweight project summary (branch, dirty files, memory stats, failing tests). Call this once at startup — or any time you need to re-orient — to understand where you are and what you can do without asking the user.",
+                inputSchema: schema(
+                    properties: [
+                        "work_dir": prop("string", "Working directory to scope the environment lookup. Defaults to the active tab's directory."),
+                    ]
+                )
+            ),
         ]
     }
 
@@ -744,9 +753,10 @@ struct MCPRouter: Sendable {
     ## Startup ritual (do this immediately, in order)
 
     1. Call register_peer with a descriptive name and role. This returns your peer_id AND injects live project context (CLAUDE.md, git state, memories, active peers) so you orient yourself without asking the user. Save the peer_id — you need it for all peer tools.
-    2. Call set_tab_title to label your terminal tab with your role (e.g. "orchestrator", "reviewer").
-    3. Call get_last_handoff to check if a previous agent session left a handoff summary — decide whether to continue that work or start fresh.
-    4. Call receive_messages to pick up any queued instructions from other agents or the previous session.
+    2. Call get_agent_environment to learn which pane you are running in (tab_id, pane_id), what CTerm capabilities are active (browser, test runner, etc.), and a lightweight project summary. This is your situational awareness snapshot.
+    3. Call set_tab_title to label your terminal tab with your role (e.g. "orchestrator", "reviewer").
+    4. Call get_last_handoff to check if a previous agent session left a handoff summary — decide whether to continue that work or start fresh.
+    5. Call receive_messages to pick up any queued instructions from other agents or the previous session.
 
     ## What you can do — tool categories
 
@@ -786,6 +796,7 @@ struct MCPRouter: Sendable {
     - forget — delete a memory by key
 
     ### Project context and diagnostics
+    - get_agent_environment — your pane ID, MCP/browser server status, capabilities manifest, branch, dirty files — call once at startup for full situational awareness
     - get_project_context — CLAUDE.md, git branch, recent commits, dirty files, memories, failing tests, active peers — call this any time you need to re-orient
     - get_git_status — current branch and modified files
     - get_last_error — most recent shell error across all panes (check this after running commands in other panes)

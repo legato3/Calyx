@@ -32,7 +32,12 @@ struct AgentRunPanelView: View {
                 terminalBar
             }
         }
-        .background(.ultraThinMaterial)
+        .background(Color(nsColor: NSColor(calibratedWhite: 0.08, alpha: 1.0)))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 0.5)
+        }
     }
 
     // MARK: - Chat content
@@ -96,12 +101,16 @@ struct AgentRunPanelView: View {
         HStack(alignment: .top, spacing: 8) {
             Spacer(minLength: 40)
             Text(session.intent)
-                .font(.system(size: 12))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.accentColor.opacity(0.3), lineWidth: 0.5)
+                )
         }
     }
 
@@ -243,8 +252,11 @@ struct AgentRunPanelView: View {
                 .tint(.orange)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.06))
+        .padding(.vertical, 9)
+        .background(Color.orange.opacity(0.12))
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.orange.opacity(0.4)).frame(height: 1)
+        }
     }
 
     // MARK: - Terminal bar
@@ -263,8 +275,11 @@ struct AgentRunPanelView: View {
                 .controlSize(.mini)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(exitTint.opacity(0.05))
+        .padding(.vertical, 9)
+        .background(exitTint.opacity(0.10))
+        .overlay(alignment: .top) {
+            Rectangle().fill(exitTint.opacity(0.35)).frame(height: 1)
+        }
     }
 
     // MARK: - Helpers
@@ -346,7 +361,7 @@ private struct ToolCallChip: View {
     var onSkip: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 6) {
             statusIcon
             Text(item.label)
                 .font(.system(size: 11, design: .monospaced))
@@ -357,9 +372,19 @@ private struct ToolCallChip: View {
                 approvalButtons
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(backgroundFill, in: RoundedRectangle(cornerRadius: 6))
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(backgroundFill, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(accentColor.opacity(0.2), lineWidth: 0.5)
+        )
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(accentColor)
+                .frame(width: 2.5)
+                .padding(.vertical, 4)
+        }
     }
 
     @ViewBuilder
@@ -407,11 +432,16 @@ private struct ToolCallChip: View {
     }
 
     private var backgroundFill: some ShapeStyle {
+        AnyShapeStyle(accentColor.opacity(0.12))
+    }
+
+    private var accentColor: Color {
         switch item.status {
-        case .done:    return AnyShapeStyle(Color.green.opacity(0.07))
-        case .running: return AnyShapeStyle(Color.accentColor.opacity(0.08))
-        case .failed:  return AnyShapeStyle(Color.red.opacity(0.07))
-        default:       return AnyShapeStyle(Color.primary.opacity(0.05))
+        case .done:    return .green
+        case .running: return .accentColor
+        case .failed:  return .red
+        case .skipped: return .secondary
+        case .pending: return .secondary
         }
     }
 }

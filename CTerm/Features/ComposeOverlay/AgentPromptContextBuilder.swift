@@ -41,6 +41,11 @@ enum AgentPromptContextBuilder {
             }
         }
 
+        // CTerm environment: pane identity and capabilities
+        if let envSection = ctermEnvironmentSection(for: activeTab) {
+            sections.append(envSection)
+        }
+
         if let shellError = shellErrorSection(for: activeTab) {
             sections.append(shellError)
         }
@@ -52,6 +57,39 @@ enum AgentPromptContextBuilder {
         }
 
         return sections
+    }
+
+    private static func ctermEnvironmentSection(for tab: Tab) -> String? {
+        let server = CTermMCPServer.shared
+        let browser = BrowserServer.shared
+        let ipcState = IPCAgentState.shared
+
+        var lines: [String] = ["<cterm_environment>"]
+        lines.append("tab_id: \(tab.id.uuidString)")
+        lines.append("tab_title: \(tab.title)")
+
+        if let focusedID = tab.splitTree.focusedLeafID {
+            lines.append("pane_id: \(focusedID.uuidString)")
+        }
+
+        let paneCount = tab.splitTree.allLeafIDs().count
+        if paneCount > 1 {
+            lines.append("split_panes: \(paneCount) (use get_workspace_state to see layout)")
+        }
+
+        if ipcState.activePeerCount > 0 {
+            lines.append("active_peers: \(ipcState.activePeerCount) (MCP IPC available for coordination)")
+        }
+
+        var caps: [String] = []
+        if server.isRunning { caps.append("mcp_ipc:port=\(server.port)") }
+        if browser.isRunning { caps.append("browser_automation:port=\(browser.port)") }
+        if !caps.isEmpty {
+            lines.append("capabilities: \(caps.joined(separator: ", "))")
+        }
+
+        lines.append("</cterm_environment>")
+        return lines.joined(separator: "\n")
     }
 
     private static func lastHandoffSection(pwd: String) -> String? {

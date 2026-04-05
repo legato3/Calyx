@@ -373,6 +373,9 @@ final class CTermMCPServer {
         case "get_last_handoff":
             return handleGetLastHandoff(id: id, arguments: arguments)
 
+        case "get_agent_environment":
+            return handleGetAgentEnvironment(id: id, arguments: arguments)
+
         default:
             return toolError(id: id, text: "Unknown tool: \(toolName)")
         }
@@ -1189,6 +1192,103 @@ final class CTermMCPServer {
         guard let data = try? JSONSerialization.data(withJSONObject: result),
               let text = String(data: data, encoding: .utf8) else {
             return toolSuccess(id: id, text: "{\"found\":false}")
+        }
+        return toolSuccess(id: id, text: text)
+    }
+
+    // MARK: - Agent Environment
+
+    /// Returns a self-orientation snapshot: where the agent is, what it can do,
+    /// and what the current CTerm environment looks like.
+    private func handleGetAgentEnvironment(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) -> (statusCode: Int, body: Data?) {
+        let workDir = arguments?["work_dir"]?.stringValue ?? resolvedWorkDir()
+
+        var env: [String: Any] = [:]
+
+        // MCP server connection info
+        env["mcp_server"] = [
+            "port": CTermMCPServer.shared.port,
+            "host": "127.0.0.1",
+            "protocol": "HTTP/JSON-RPC",
+            "auth": "Bearer token (injected by CTerm into your environment as CTERM_MCP_TOKEN)",
+        ] as [String: Any]
+
+        // Browser server status
+        let browser = BrowserServer.shared
+        if browser.isRunning {
+            env["browser_server"] = [
+                "running": true,
+                "port": browser.port,
+                "host": "127.0.0.1",
+                "note": "Use 'cterm browser' CLI or browser_* MCP tools for web automation",
+            ] as [String: Any]
+        } else {
+            env["browser_server"] = ["running": false] as [String: Any]
+        }
+
+        // Which pane/tab the agent is likely running in (match by pwd)
+        if let delegate = TerminalControlBridge.shared.delegate {
+            let session = delegate.terminalWindowSession
+            let allTabs = session.groups.flatMap(\.tabs)
+            if let matchingTab = allTabs.first(where: { $0.pwd == workDir }) {
+                var paneCtx: [String: Any] = [
+                    "tab_id": matchingTab.id.uuidString,
+                    "tab_title": matchingTab.title,
+                    "pwd": matchingTab.pwd ?? workDir,
+                ]
+                if let focusedID = matchingTab.splitTree.focusedLeafID {
+                    paneCtx["pane_id"] = focusedID.uuidString
+                }
+                let paneCount = matchingTab.splitTree.allLeafIDs().count
+                if paneCount > 1 {
+                    paneCtx["split_pane_count"] = paneCount
+                    paneCtx["note"] = "This tab has \(paneCount) panes. Use get_workspace_state for full layout."
+                }
+                env["my_pane"] = paneCtx
+            }
+        }
+
+        // Active peers
+        let peers = MainActor.assumeIsolated { IPCAgentState.shared.peers }
+        if !peers.isEmpty {
+            env["active_peers"] = peers.map { p -> [String: Any] in
+                [
+                    "name": p.name,
+                    "role": p.role,
+                    "status": AgentStatus.infer(from: p).label,
+                ]
+            }
+        }
+
+        // Capabilities manifest — what's available in this CTerm build
+        env["capabilities"] = [
+            "terminal_control": true,
+            "split_panes": true,
+            "browser_automation": browser.isRunning,
+            "agent_memory": true,
+            "task_queue": true,
+            "delegation": true,
+            "git_integration": true,
+            "test_runner": true,
+            "peer_ipc": true,
+            "desktop_notifications": true,
+            "terminal_search": true,
+        ] as [String: Any]
+
+        // Lightweight project context (no full CLAUDE.md — use get_project_context for that)
+        let ctx = ProjectContextProvider.gather(workDir: workDir)
+        if let branch = ctx["branch"] as? String { env["branch"] = branch }
+        if let dirty = ctx["dirty_files"] as? [String], !dirty.isEmpty { env["dirty_files"] = dirty }
+        if let stats = ctx["memory_stats"] as? [String: Any] { env["memory_stats"] = stats }
+        if let tests = ctx["failing_tests"] as? [String], !tests.isEmpty { env["failing_tests"] = tests }
+        env["cwd"] = workDir
+
+        guard let data = try? JSONSerialization.data(withJSONObject: env),
+              let text = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{\"cwd\":\"\(workDir)\"}")
         }
         return toolSuccess(id: id, text: text)
     }

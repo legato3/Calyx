@@ -14,7 +14,7 @@ struct AgentRunPanelStrip: View {
     var body: some View {
         HStack(spacing: 0) {
             Button(action: onExpand) {
-                HStack(spacing: 5) {
+                HStack(spacing: 6) {
                     phaseIcon
                     Text(chipLabel)
                         .font(.system(size: 11, weight: .medium, design: .rounded))
@@ -25,7 +25,11 @@ struct AgentRunPanelStrip: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(phaseColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                .background(phaseColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(phaseColor.opacity(0.25), lineWidth: 0.5)
+                )
             }
             .buttonStyle(.plain)
 
@@ -42,9 +46,14 @@ struct AgentRunPanelStrip: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+        .padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial)
+        .background(Color(nsColor: NSColor(calibratedWhite: 0.08, alpha: 1.0)))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 0.5)
+        }
     }
 
     @ViewBuilder

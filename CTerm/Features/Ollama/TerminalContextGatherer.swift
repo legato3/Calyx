@@ -13,6 +13,9 @@ struct TerminalContext: Sendable {
     let gitStatusLines: String?
     let projectType: String?
     let activeEnv: String?
+    /// CTerm-specific environment: pane identity, active capabilities.
+    /// Nil when gathered outside a CTerm window context.
+    let ctermEnvironment: CTermEnvironmentContext?
 
     /// Compact one-liner for embedding in prompts.
     var contextBlock: String {
@@ -25,7 +28,44 @@ struct TerminalContext: Sendable {
         }
         if let proj = projectType { lines.append("- Project type: \(proj)") }
         if let env = activeEnv { lines.append("- Active environment: \(env)") }
+        if let cterm = ctermEnvironment { lines.append(cterm.contextBlock) }
         return lines.joined(separator: "\n")
+    }
+}
+
+/// Lightweight snapshot of the CTerm environment injected into every AI prompt.
+/// Tells inline agents where they are and what they can do — without requiring
+/// them to call register_peer or any MCP tool first.
+struct CTermEnvironmentContext: Sendable {
+    let tabID: String?
+    let tabTitle: String?
+    let paneID: String?
+    let splitPaneCount: Int
+    let activePeerCount: Int
+    let browserAvailable: Bool
+    let mcpPort: Int?
+
+    var contextBlock: String {
+        var parts: [String] = []
+
+        if let title = tabTitle {
+            var paneDesc = "- CTerm tab: \"\(title)\""
+            if splitPaneCount > 1 { paneDesc += " (\(splitPaneCount) split panes)" }
+            parts.append(paneDesc)
+        }
+
+        if activePeerCount > 0 {
+            parts.append("- Active AI peers in this window: \(activePeerCount) (use MCP IPC tools to coordinate)")
+        }
+
+        var caps: [String] = []
+        if browserAvailable { caps.append("browser automation") }
+        if mcpPort != nil { caps.append("MCP IPC on port \(mcpPort!)") }
+        if !caps.isEmpty {
+            parts.append("- CTerm capabilities: \(caps.joined(separator: ", "))")
+        }
+
+        return parts.joined(separator: "\n")
     }
 }
 
@@ -40,6 +80,7 @@ enum TerminalContextGatherer {
 
         let projectType = pwd.flatMap { detectProjectType(at: $0) }
         let activeEnv = buildEnvSummary()
+        let ctermEnv = buildCTermEnvironment(pwd: pwd)
 
         return TerminalContext(
             pwd: pwd,
@@ -47,8 +88,38 @@ enum TerminalContextGatherer {
             gitBranch: await gitBranch,
             gitStatusLines: await gitStatus,
             projectType: projectType,
-            activeEnv: activeEnv
+            activeEnv: activeEnv,
+            ctermEnvironment: ctermEnv
         )
+    }
+
+    // MARK: - CTerm Environment
+
+    /// Builds a lightweight CTerm environment snapshot on the main actor.
+    /// Safe to call from background — uses MainActor.assumeIsolated for
+    /// the observable state reads that are always mutated on main.
+    private static func buildCTermEnvironment(pwd: String?) -> CTermEnvironmentContext? {
+        MainActor.assumeIsolated {
+            let server = CTermMCPServer.shared
+            let browser = BrowserServer.shared
+            let ipcState = IPCAgentState.shared
+
+            // Find the tab matching this pwd for pane identity
+            let delegate = TerminalControlBridge.shared.delegate
+            let session = delegate?.terminalWindowSession
+            let matchingTab = session?.groups.flatMap(\.tabs)
+                .first(where: { $0.pwd == pwd })
+
+            return CTermEnvironmentContext(
+                tabID: matchingTab?.id.uuidString,
+                tabTitle: matchingTab?.title,
+                paneID: matchingTab.flatMap { $0.splitTree.focusedLeafID?.uuidString },
+                splitPaneCount: matchingTab?.splitTree.allLeafIDs().count ?? 1,
+                activePeerCount: ipcState.activePeerCount,
+                browserAvailable: browser.isRunning,
+                mcpPort: server.isRunning ? server.port : nil
+            )
+        }
     }
 
     // MARK: - Git
