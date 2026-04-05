@@ -39,7 +39,8 @@ final class ComposeOverlayController {
     private var agentSendEnterKey: ((GhosttySurfaceController) -> Void)?
 
     // Shell commands that are safe to run without user approval in agent mode.
-    // Must be read-only or purely observational — no writes, no deletes, no network side-effects.
+    // Now delegated to RiskScorer — this list is kept only as a fast-path hint.
+    // The actual decision is made by RiskScorer.isAutoApprovable().
     private static let autoRunPrefixes: Set<String> = [
         "ls", "ll", "cat", "pwd", "echo", "which", "type",
         "head", "tail", "wc", "diff", "file",
@@ -760,46 +761,39 @@ final class ComposeOverlayController {
     }
 
     /// Returns `true` if the command is safe to auto-run without user approval.
-    /// Only pure read/inspect commands qualify — anything that writes, deletes, or
-    /// has network side-effects must still go through the approval flow.
-    /// Also respects AgentPermissionsStore autonomy levels.
+    /// Delegates to RiskScorer for consistent risk evaluation across the codebase.
+    /// Also checks ApprovalMemory for previously approved patterns.
     private func isSafeAutoRunCommand(_ command: String) -> Bool {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty else { return false }
 
         let permissions = AgentPermissionsStore.shared
 
-        // Check permission profile — if runCommands is alwaysAllow, skip safe-list check
+        // Check permission profile — if runCommands is alwaysAllow, skip risk check
         if permissions.level(for: .runCommands) == .alwaysAllow { return true }
         // If runCommands is never or alwaysAsk, always require approval
         if permissions.isBlocked(.runCommands) { return false }
         if permissions.level(for: .runCommands) == .alwaysAsk { return false }
 
-        // agentDecides or default: use the safe-command list
-        // Never auto-run if it contains destructive patterns.
-        let destructive = ["rm ", "rmdir", "sudo", "kill ", "pkill", "chmod", "chown",
-                           "git commit", "git push", "git pull", "git merge", "git rebase",
-                           "git reset", "git checkout ", "git switch", "git stash pop",
-                           "npm install", "npm run", "cargo build", "cargo run",
-                           "xcodebuild build", "make ", "brew install", "brew upgrade"]
-        if destructive.contains(where: { trimmed.contains($0) }) { return false }
-        // Block redirects and pipes to mutating commands.
-        if trimmed.contains(" > ") || trimmed.contains(" >> ") { return false }
+        // agentDecides: use RiskScorer
+        let pwd = agentTargetController.flatMap { _ in
+            TerminalControlBridge.shared.delegate?.activeTabPwd
+        }
+        let gitBranch = TerminalControlBridge.shared.delegate?.activeTabGitBranch
 
-        // Check git operations permission
-        if trimmed.hasPrefix("git ") && permissions.level(for: .gitOperations) == .alwaysAsk { return false }
-
-        // Check network permission
-        let networkPrefixes = ["curl", "wget", "npm", "yarn", "pip", "pip3", "brew"]
-        if networkPrefixes.contains(where: { trimmed.hasPrefix($0) }) {
-            if permissions.level(for: .networkAccess) != .alwaysAllow { return false }
+        // Check approval memory first (fast path)
+        let projectKey = pwd.map { AgentMemoryStore.key(for: $0) }
+        if ApprovalMemory.shared.isRemembered(command: command, projectKey: projectKey) {
+            return true
         }
 
-        let firstToken = trimmed.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
-        if Self.autoRunPrefixes.contains(firstToken) { return true }
-        let firstTwo = trimmed.split(whereSeparator: \.isWhitespace).prefix(2).joined(separator: " ")
-        if Self.autoRunPrefixes.contains(firstTwo) { return true }
-        return false
+        // Risk-score the command
+        return RiskScorer.isAutoApprovable(
+            command: command,
+            pwd: pwd,
+            gitBranch: gitBranch,
+            threshold: permissions.autoApproveThreshold
+        )
     }
 
     private func agentRecentCommandContext(for activeTab: Tab) -> String {

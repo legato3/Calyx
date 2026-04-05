@@ -50,6 +50,10 @@ protocol TerminalControl: AnyObject {
     /// Working directory of the active tab, used as a default for new tabs.
     var activeTabPwd: String? { get }
 
+    /// Current git branch of the active tab's working directory, if available.
+    /// Used by RiskScorer for protected-branch detection.
+    var activeTabGitBranch: String? { get }
+
     /// Create a new terminal tab.
     /// - Parameters:
     ///   - pwd: Initial working directory. Nil uses the active tab's pwd.

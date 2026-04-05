@@ -124,6 +124,66 @@ final class AgentLoopCoordinator {
         await executeSession(pwd: pwd)
     }
 
+    /// Batch-approve steps using risk-aware batching.
+    /// Auto-approves low-risk steps and returns batches for user review.
+    func batchApproveSteps(pwd: String?, gitBranch: String? = nil) -> [ApprovalBatch] {
+        guard let session = activeSession,
+              session.phase == .awaitingApproval else { return [] }
+
+        let projectKey = pwd.map { AgentMemoryStore.key(for: $0) }
+        let (autoApproved, batches) = ApprovalBatcher.batch(
+            steps: session.planSteps,
+            pwd: pwd,
+            gitBranch: gitBranch,
+            memory: ApprovalMemory.shared
+        )
+
+        // Auto-approve low-risk steps immediately
+        for stepID in autoApproved {
+            if let idx = session.planSteps.firstIndex(where: { $0.id == stepID }) {
+                session.planSteps[idx].status = .approved
+            }
+        }
+
+        return batches
+    }
+
+    /// Approve a specific batch and optionally remember the decision.
+    func approveBatch(_ batch: ApprovalBatch, rememberScope: ApprovalScope?, pwd: String?) {
+        guard let session = activeSession else { return }
+
+        for stepID in batch.stepIDs {
+            if let idx = session.planSteps.firstIndex(where: { $0.id == stepID }) {
+                session.planSteps[idx].status = .approved
+            }
+        }
+
+        // Remember if requested
+        if let scope = rememberScope {
+            let projectKey = pwd.map { AgentMemoryStore.key(for: $0) }
+            ApprovalMemory.shared.rememberBatch(batch, scope: scope, projectKey: projectKey)
+        }
+    }
+
+    /// Deny a batch and propose safer alternatives.
+    func denyBatch(_ batch: ApprovalBatch) -> [DenialAlternative] {
+        guard let session = activeSession else { return [] }
+
+        var alternatives: [DenialAlternative] = []
+        for item in batch.items {
+            if let idx = session.planSteps.firstIndex(where: { $0.id == item.stepID }) {
+                session.planSteps[idx].status = .skipped
+            }
+            if let alt = DenialHandler.proposeSaferAlternative(
+                command: item.command,
+                assessment: item.assessment
+            ) {
+                alternatives.append(alt)
+            }
+        }
+        return alternatives
+    }
+
     /// Approve a single step by ID.
     func approveStep(id: UUID) {
         guard let session = activeSession else { return }

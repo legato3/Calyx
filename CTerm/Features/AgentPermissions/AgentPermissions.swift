@@ -185,6 +185,34 @@ final class AgentPermissionsStore {
         activeProfile.level(for: category)
     }
 
+    /// Risk threshold for auto-approval when autonomy is `.agentDecides`.
+    /// Actions scoring below this threshold are auto-approved.
+    var autoApproveThreshold: Int {
+        get { UserDefaults.standard.integer(forKey: "cterm.agentPermissions.autoApproveThreshold").clamped(to: 0...100, default: 20) }
+        set { UserDefaults.standard.set(newValue, forKey: "cterm.agentPermissions.autoApproveThreshold") }
+    }
+
+    /// Decide whether an action should proceed based on its risk assessment.
+    /// Returns `.autoApprove`, `.requireApproval`, or `.blocked`.
+    func decide(for assessment: RiskAssessment) -> ApprovalDecision {
+        let autonomy = level(for: assessment.category)
+
+        switch autonomy {
+        case .alwaysAllow:
+            return .autoApprove
+        case .never:
+            return .blocked(reason: "\(assessment.category.displayName) is disabled in the current profile")
+        case .alwaysAsk:
+            return .requireApproval
+        case .agentDecides:
+            // Use risk score to decide
+            if assessment.score < autoApproveThreshold {
+                return .autoApprove
+            }
+            return .requireApproval
+        }
+    }
+
     /// Returns true if the agent should proceed without asking for this category.
     func shouldAutoAllow(_ category: AgentActionCategory) -> Bool {
         switch level(for: category) {
@@ -239,5 +267,21 @@ final class AgentPermissionsStore {
               let custom = try? JSONDecoder().decode([AgentPermissionProfile].self, from: data)
         else { return }
         profiles.append(contentsOf: custom)
+    }
+}
+
+// MARK: - Approval Decision
+
+enum ApprovalDecision: Sendable {
+    case autoApprove
+    case requireApproval
+    case blocked(reason: String)
+}
+
+// MARK: - Int Clamping
+
+private extension Int {
+    func clamped(to range: ClosedRange<Int>, default fallback: Int) -> Int {
+        self == 0 && !range.contains(0) ? fallback : Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
     }
 }

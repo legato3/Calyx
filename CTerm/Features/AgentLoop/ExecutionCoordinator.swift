@@ -249,18 +249,54 @@ final class ExecutionCoordinator {
     private func executeLocalShell(step: AgentPlanStep, index: Int) {
         guard let command = step.command else { return }
 
-        // Check permissions
         let permissions = AgentPermissionsStore.shared
-        let category = categorizeCommand(command)
+        let pwd = TerminalControlBridge.shared.delegate?.activeTabPwd
+        let gitBranch = TerminalControlBridge.shared.delegate?.activeTabGitBranch
 
-        if permissions.isBlocked(category) {
+        // Risk-score the command in context
+        let assessment = RiskScorer.assess(
+            command: command,
+            pwd: pwd,
+            gitBranch: gitBranch
+        )
+
+        let decision = permissions.decide(for: assessment)
+
+        switch decision {
+        case .blocked(let reason):
             session.planSteps[index].status = .failed
-            session.planSteps[index].output = "Blocked by permissions: \(category.displayName)"
-            logger.warning("ExecutionCoordinator: blocked by permissions: \(category.rawValue)")
+            session.planSteps[index].output = "Blocked: \(reason)"
+            logger.warning("ExecutionCoordinator: blocked (\(assessment.tier.rawValue)): \(command.prefix(60))")
+
+            // Propose a safer alternative
+            if let alternative = DenialHandler.proposeSaferAlternative(command: command, assessment: assessment) {
+                if let saferCommand = alternative.saferCommand {
+                    session.planSteps[index].output = "Blocked: \(reason)\nSuggested alternative: \(saferCommand)\n\(alternative.explanation)"
+                }
+            }
+
             executionTask = Task { @MainActor [weak self] in
                 self?.executeNextStep()
             }
             return
+
+        case .requireApproval:
+            // Step should already be in .approved state from the approval flow.
+            // If it somehow got here without approval, mark it pending.
+            if step.status != .approved {
+                session.planSteps[index].status = .pending
+                logger.info("ExecutionCoordinator: step requires approval (risk \(assessment.score)): \(command.prefix(60))")
+                return
+            }
+
+        case .autoApprove:
+            // Record in approval memory for this session
+            ApprovalMemory.shared.remember(
+                command: command,
+                tier: assessment.tier,
+                scope: .session,
+                projectKey: pwd.map { AgentMemoryStore.key(for: $0) }
+            )
         }
 
         session.planSteps[index].status = .running
@@ -383,30 +419,7 @@ final class ExecutionCoordinator {
     // MARK: - Helpers
 
     private func categorizeCommand(_ command: String) -> AgentActionCategory {
-        let lower = command.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let firstToken = lower.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
-
-        // Destructive
-        if ["rm", "rmdir"].contains(firstToken) { return .deleteFiles }
-
-        // Git
-        let gitWrite = ["git commit", "git push", "git merge", "git rebase", "git reset"]
-        if gitWrite.contains(where: { lower.hasPrefix($0) }) { return .gitOperations }
-
-        // Network
-        let netCommands = ["curl", "wget", "npm install", "pip install", "cargo install"]
-        if netCommands.contains(where: { lower.hasPrefix($0) }) { return .networkAccess }
-
-        // Read-only
-        let readOnly = ["cat", "ls", "find", "grep", "head", "tail", "wc", "git status",
-                        "git log", "git diff", "git branch", "git show", "pwd", "echo"]
-        if readOnly.contains(where: { lower.hasPrefix($0) }) { return .readFiles }
-
-        // Write
-        let writeCommands = ["sed -i", "tee", "mv", "cp"]
-        if writeCommands.contains(where: { lower.contains($0) }) { return .writeFiles }
-
-        return .runCommands
+        RiskScorer.categorize(command.lowercased().trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     private func rememberFact(key: String, value: String) {

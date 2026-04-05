@@ -25,15 +25,7 @@ final class AgentPlanExecutor {
     private var executionTask: Task<Void, Never>?
     private var currentStepStartTime: Date?
 
-    // Safe auto-run prefixes (mirrors ComposeOverlayController's list)
-    private static let safeCommandPrefixes: Set<String> = [
-        "ls", "ll", "cat", "pwd", "echo", "which", "type",
-        "head", "tail", "wc", "diff", "file",
-        "git log", "git status", "git branch", "git diff",
-        "git show", "git stash list", "git remote",
-        "find", "rg", "grep", "awk", "sed", "sort", "uniq", "cut",
-        "env", "printenv", "date", "uname", "whoami", "df", "du", "ps",
-    ]
+    // Safe auto-run is now delegated to RiskScorer — no duplicated command lists.
 
     init(planStore: AgentPlanStore) {
         self.planStore = planStore
@@ -131,32 +123,24 @@ final class AgentPlanExecutor {
         guard let plan = planStore.activePlan else { return }
         let permissions = AgentPermissionsStore.shared
 
-        // Only auto-approve if the permission profile allows
+        // Only auto-approve if the permission profile allows agent-decides or always-allow
         guard permissions.shouldAutoAllow(.runCommands) else { return }
 
+        let pwd = TerminalControlBridge.shared.delegate?.activeTabPwd
+        let gitBranch = TerminalControlBridge.shared.delegate?.activeTabGitBranch
+
         for step in plan.steps where step.status == .pending {
-            if let command = step.command, isSafeCommand(command) {
+            if let command = step.command {
+                let assessment = RiskScorer.assess(command: command, pwd: pwd, gitBranch: gitBranch)
+                let decision = permissions.decide(for: assessment)
+                if case .autoApprove = decision {
+                    planStore.approveStep(id: step.id)
+                }
+            } else {
+                // Informational steps are always safe
                 planStore.approveStep(id: step.id)
             }
         }
-    }
-
-    private func isSafeCommand(_ command: String) -> Bool {
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !trimmed.isEmpty else { return false }
-
-        // Block destructive patterns
-        let destructive = ["rm ", "rmdir", "sudo", "kill ", "git commit", "git push",
-                           "git pull", "git merge", "git rebase", "git reset",
-                           "npm install", "npm run", "cargo build", "make "]
-        if destructive.contains(where: { trimmed.contains($0) }) { return false }
-        if trimmed.contains(" > ") || trimmed.contains(" >> ") { return false }
-
-        let firstToken = trimmed.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
-        if Self.safeCommandPrefixes.contains(firstToken) { return true }
-        let firstTwo = trimmed.split(whereSeparator: \.isWhitespace).prefix(2).joined(separator: " ")
-        if Self.safeCommandPrefixes.contains(firstTwo) { return true }
-        return false
     }
 
     private func completePlan() {

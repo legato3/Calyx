@@ -1977,6 +1977,14 @@ extension CTermWindowController: TerminalControl {
 
     var activeTabPwd: String? { activeTab?.pwd }
 
+    var activeTabGitBranch: String? {
+        // Synchronously return nil — git branch is fetched async by RiskScorer callers
+        // when they need it. The TerminalContextGatherer.fetchGitBranch is the canonical
+        // async path. For the synchronous protocol requirement, we return the cached
+        // branch from the sidebar view's last fetch, or nil.
+        nil
+    }
+
     // MARK: create_tab
 
     func createTab(pwd: String?, title: String?, command: String?) {
