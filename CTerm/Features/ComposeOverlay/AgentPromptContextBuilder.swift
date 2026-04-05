@@ -34,6 +34,11 @@ enum AgentPromptContextBuilder {
         if let pwd = activeTab.pwd?.trimmingCharacters(in: .whitespacesAndNewlines),
            !pwd.isEmpty {
             sections.append(ProjectContextProvider.formattedBlock(for: pwd))
+
+            // Cross-session continuity: inject last handoff summary if available
+            if let handoff = lastHandoffSection(pwd: pwd) {
+                sections.append(handoff)
+            }
         }
 
         if let shellError = shellErrorSection(for: activeTab) {
@@ -47,6 +52,21 @@ enum AgentPromptContextBuilder {
         }
 
         return sections
+    }
+
+    private static func lastHandoffSection(pwd: String) -> String? {
+        let projectKey = AgentMemoryStore.key(for: pwd)
+        guard let handoff = AgentMemoryStore.shared.lastHandoff(projectKey: projectKey) else {
+            return nil
+        }
+        // Only include if the handoff is recent (< 24 hours)
+        guard Date().timeIntervalSince(handoff.updatedAt) < 86400 else { return nil }
+
+        return """
+        <previous_session_handoff>
+        \(handoff.value)
+        </previous_session_handoff>
+        """
     }
 
     private static func shellErrorSection(for tab: Tab) -> String? {

@@ -73,12 +73,52 @@ final class ActiveAISuggestionEngine {
                 self.suggestions.append(chip)
             }
         }
+
+        // Listen for agent loop session completions (pipeline output)
+        guard sessionObserver == nil else { return }
+        sessionObserver = NotificationCenter.default.addObserver(
+            forName: .agentSessionCompleted,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let nextActions = note.userInfo?["nextActions"] as? [String] ?? []
+            let summary = note.userInfo?["summary"] as? String ?? ""
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // Only add chips if the pipeline coordinator hasn't already injected them
+                let hasContinueChip = self.suggestions.contains { s in
+                    if case .continueAgent = s.kind { return true }
+                    return false
+                }
+                guard self.suggestions.isEmpty || !hasContinueChip else { return }
+                if !summary.isEmpty {
+                    self.suggestions.append(ActiveAISuggestion(
+                        prompt: summary,
+                        icon: "checkmark.circle.fill",
+                        kind: .continueAgent
+                    ))
+                }
+                for action in nextActions.prefix(2) {
+                    self.suggestions.append(ActiveAISuggestion(
+                        prompt: action,
+                        icon: "arrow.right.circle",
+                        kind: .nextStep
+                    ))
+                }
+            }
+        }
     }
+
+    private var sessionObserver: NSObjectProtocol?
 
     func stopObserving() {
         if let observer = planObserver {
             NotificationCenter.default.removeObserver(observer)
             planObserver = nil
+        }
+        if let observer = sessionObserver {
+            NotificationCenter.default.removeObserver(observer)
+            sessionObserver = nil
         }
     }
 
@@ -103,6 +143,11 @@ final class ActiveAISuggestionEngine {
         generationTask = nil
         suggestions = []
         isGenerating = false
+    }
+
+    /// Inject a suggestion from the agent loop pipeline (e.g. after session completion).
+    func injectSuggestion(_ suggestion: ActiveAISuggestion) {
+        suggestions.append(suggestion)
     }
 
     // MARK: - Static Suggestions

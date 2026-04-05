@@ -22,6 +22,7 @@ enum AuditEventType: String, Codable, Sendable, CaseIterable {
     case peerConnected      = "peerConnected"
     case taskCompleted      = "taskCompleted"
     case checkpointCreated  = "checkpointCreated"
+    case agentPhaseChanged  = "agentPhaseChanged"
 
     var displayName: String {
         switch self {
@@ -33,6 +34,7 @@ enum AuditEventType: String, Codable, Sendable, CaseIterable {
         case .peerConnected:     return "Peer connected"
         case .taskCompleted:     return "Task completed"
         case .checkpointCreated: return "Checkpoint"
+        case .agentPhaseChanged: return "Agent phase"
         }
     }
 
@@ -46,6 +48,7 @@ enum AuditEventType: String, Codable, Sendable, CaseIterable {
         case .peerConnected:     return "person.fill.badge.plus"
         case .taskCompleted:     return "checkmark.circle.fill"
         case .checkpointCreated: return "arrow.triangle.branch"
+        case .agentPhaseChanged: return "arrow.triangle.turn.up.right.diamond"
         }
     }
 
@@ -59,6 +62,7 @@ enum AuditEventType: String, Codable, Sendable, CaseIterable {
         case .peerConnected:     return "green"
         case .taskCompleted:     return "green"
         case .checkpointCreated: return "yellow"
+        case .agentPhaseChanged: return "indigo"
         }
     }
 
@@ -69,7 +73,7 @@ enum AuditEventType: String, Codable, Sendable, CaseIterable {
         case .errorRouted:                  return .errors
         case .memoryWritten, .memoryDeleted: return .memory
         case .testRunCompleted:             return .tests
-        case .peerConnected, .taskCompleted, .checkpointCreated: return .events
+        case .peerConnected, .taskCompleted, .checkpointCreated, .agentPhaseChanged: return .events
         }
     }
 }

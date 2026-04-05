@@ -23,4 +23,5 @@ enum AppStorageKeys {
     static let agentInputBarEnabled = "agentInputBarEnabled"
     static let memoryToastsEnabled = "memoryToastsEnabled"
     static let ambientAgentEnabled = "ambientAgentEnabled"
+    static let agentLoopEnabled = "agentLoopEnabled"
 }
