@@ -121,7 +121,8 @@ final class ComposeOverlayController {
             return generateSuggestion(
                 from: trimmed,
                 activeTab: activeTab,
-                focusedController: focusedController
+                focusedController: focusedController,
+                sendEnterKey: sendEnterKey
             )
         case .ollamaAgent:
             let enrichedGoal = AgentPromptContextBuilder.buildPrompt(goal: trimmed, activeTab: activeTab)
@@ -425,7 +426,8 @@ final class ComposeOverlayController {
     private func generateSuggestion(
         from prompt: String,
         activeTab: Tab?,
-        focusedController: GhosttySurfaceController?
+        focusedController: GhosttySurfaceController?,
+        sendEnterKey: @escaping (GhosttySurfaceController) -> Void
     ) -> Bool {
         let entryID = assistantState.beginEntry(kind: .commandSuggestion, prompt: prompt)
         let pwd = activeTab?.pwd
@@ -452,7 +454,12 @@ final class ComposeOverlayController {
                 }
                 self.assistantState.finishEntry(id: entryID, response: response, command: response)
                 if self.assistantState.mode == .ollamaCommand {
-                    _ = self.assistantState.loadDraft(from: entryID)
+                    self.applySuggestionBehavior(
+                        entryID: entryID,
+                        activeTab: activeTab,
+                        focusedController: focusedController,
+                        sendEnterKey: sendEnterKey
+                    )
                 }
                 self.onStateChanged?()
             } catch {
@@ -463,39 +470,104 @@ final class ComposeOverlayController {
         return true
     }
 
+    private func applySuggestionBehavior(
+        entryID: UUID,
+        activeTab: Tab?,
+        focusedController: GhosttySurfaceController?,
+        sendEnterKey: @escaping (GhosttySurfaceController) -> Void
+    ) {
+        guard let entry = assistantState.entry(id: entryID),
+              let command = entry.runnableCommand,
+              shouldAutoLoadSuggestion(command)
+        else { return }
+
+        switch OllamaSuggestionBehavior.current() {
+        case .suggestOnly:
+            return
+        case .autofill:
+            _ = assistantState.loadDraft(from: entryID)
+        case .autorunSafe:
+            if isSafeAutoRunCommand(command, for: activeTab) {
+                _ = dispatchShellCommand(
+                    command,
+                    entryID: entryID,
+                    source: .assistant,
+                    activeTab: activeTab,
+                    focusedController: focusedController,
+                    sendEnterKey: sendEnterKey
+                )
+                assistantState.clearLoadedSuggestionContext()
+            } else {
+                _ = assistantState.loadDraft(from: entryID)
+            }
+        }
+    }
+
+    private func shouldAutoLoadSuggestion(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.contains("\n"),
+              !trimmed.hasPrefix("NOTE:")
+        else { return false }
+
+        let lower = trimmed.lowercased()
+        let structuredPrefixes = ["action:", "command:", "message:", "step:", "browse:"]
+        guard !structuredPrefixes.contains(where: { lower.hasPrefix($0) }) else { return false }
+        guard ConfidenceScorer.startsWithKnownCommand(trimmed) else { return false }
+        guard !ConfidenceScorer.looksLikeNaturalLanguage(trimmed) else { return false }
+        guard !ConfidenceScorer.isGenericSuggestion(trimmed) else { return false }
+        return true
+    }
+
     private func latestTerminalObservation(
         activeTab: Tab?,
         focusedController: GhosttySurfaceController?
     ) -> String? {
         guard let activeTab else { return nil }
-
-        if let shellError = activeTab.lastShellError?.snippet,
-           !shellError.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Latest shell error:\n\(shellError)"
-        }
+        var sections: [String] = []
 
         if let block = activeTab.latestCommandBlock {
             var lines: [String] = []
             lines.append("Latest command: \(block.titleText)")
-            if let exitCode = block.exitCode {
-                lines.append("Exit code: \(exitCode)")
+            lines.append("Latest exit code: \(block.exitCode.map(String.init) ?? "?")")
+            if let errorSnippet = block.errorSnippet,
+               !errorSnippet.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.append("Latest stderr snippet:\n\(errorSnippet)")
             }
-            if let snippet = block.primarySnippet,
-               !snippet.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                lines.append("Latest output snippet:\n\(snippet)")
+            if let outputSnippet = block.outputSnippet,
+               !outputSnippet.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.append("Latest stdout snippet:\n\(outputSnippet)")
             }
-            let combined = lines.joined(separator: "\n")
-            if !combined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return combined
-            }
+            sections.append(lines.joined(separator: "\n"))
+        }
+
+        if let shellError = activeTab.lastShellError?.snippet,
+           !shellError.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            sections.append("Latest shell error:\n\(shellError)")
+        }
+
+        let attachedBlocks = activeTab.attachedBlocks.prefix(3)
+        if !attachedBlocks.isEmpty {
+            let attached = attachedBlocks.map { block in
+                var lines: [String] = []
+                lines.append("Command: \(block.titleText)")
+                lines.append("Exit: \(block.exitCode.map(String.init) ?? "?")")
+                if let snippet = block.primarySnippet,
+                   !snippet.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    lines.append("Snippet:\n\(snippet)")
+                }
+                return lines.joined(separator: "\n")
+            }.joined(separator: "\n\n")
+            sections.append("Attached command blocks:\n\(attached)")
         }
 
         if let viewport = readViewportSnippet(activeTab: activeTab, focusedController: focusedController),
            !viewport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Current viewport snippet:\n\(viewport)"
+            sections.append("Current viewport snippet:\n\(viewport)")
         }
 
-        return nil
+        let combined = sections.joined(separator: "\n\n")
+        return combined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : combined
     }
 
     private func startAgent(

@@ -508,6 +508,7 @@ final class ComposeAssistantState {
         )
         draftText = command
         mode = .shell
+        onDraftTextChanged?(command)
         markInserted(id: id)
         return true
     }
@@ -517,6 +518,7 @@ final class ComposeAssistantState {
         draftText = loadedSuggestionContext.previousDraft
         mode = loadedSuggestionContext.previousMode
         isModeLocked = loadedSuggestionContext.previousModeLocked
+        onDraftTextChanged?(loadedSuggestionContext.previousDraft)
         clearLoadedSuggestionContext()
     }
 

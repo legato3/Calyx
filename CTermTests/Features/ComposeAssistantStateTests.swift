@@ -9,6 +9,7 @@ struct ComposeAssistantStateTests {
         AppStorageKeys.composeAssistantMode,
         AppStorageKeys.composeModeLocked,
         AppStorageKeys.composeLastAgentMode,
+        AppStorageKeys.ollamaSuggestionBehavior,
         AppStorageKeys.hasSeenAgentAutoRouteHint,
     ]
 
@@ -86,6 +87,39 @@ struct ComposeAssistantStateTests {
         #expect(state.mode == .shell)
         #expect(state.isModeLocked)
         #expect(state.entry(id: entryID)?.status == .inserted)
+    }
+
+    @Test("Reverting a loaded suggestion restores the original prompt and mode")
+    func revertLoadedSuggestionRestoresPreviousDraft() {
+        defer { resetDefaults() }
+
+        let state = ComposeAssistantState()
+        state.mode = .ollamaCommand
+        state.isModeLocked = true
+        state.setDraftText("find the changed files")
+
+        let entryID = state.addEntry(
+            kind: .commandSuggestion,
+            prompt: "find the changed files",
+            response: "git status --short",
+            command: "git status --short",
+            status: .ready
+        )
+
+        #expect(state.loadDraft(from: entryID))
+        state.revertLoadedSuggestion()
+
+        #expect(state.draftText == "find the changed files")
+        #expect(state.mode == .ollamaCommand)
+        #expect(state.isModeLocked)
+        #expect(state.loadedSuggestionEntry == nil)
+    }
+
+    @Test("Ollama suggestion behavior defaults to autofill")
+    func ollamaSuggestionBehaviorDefaultsToAutofill() {
+        defer { resetDefaults() }
+
+        #expect(OllamaSuggestionBehavior.current() == .autofill)
     }
 
     private func resetDefaults() {

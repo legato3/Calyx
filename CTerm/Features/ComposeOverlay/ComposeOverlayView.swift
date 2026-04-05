@@ -42,6 +42,8 @@ class ComposeOverlayView: NSView {
     var onTextChange: ((String) -> Void)?
     /// Called when Cmd+Return is pressed — Warp-style "send to agent" shortcut.
     var onCmdReturn: (() -> Void)?
+    /// Called when Tab is pressed to accept the latest suggestion when available.
+    var onTabComplete: (() -> Bool)?
     var placeholderText: String = "Type here..." {
         didSet { placeholderLabel.stringValue = placeholderText }
     }
@@ -229,6 +231,11 @@ extension ComposeOverlayView: NSTextViewDelegate {
         case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
             insertNewlineIgnoringFieldEditor(nil)
             return true
+        case #selector(NSResponder.insertTab(_:)):
+            if onTabComplete?() == true {
+                return true
+            }
+            return false
         case #selector(NSResponder.cancelOperation(_:)):
             cancelOperation(nil)
             return true

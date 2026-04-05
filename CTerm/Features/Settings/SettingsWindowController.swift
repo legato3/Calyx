@@ -33,6 +33,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
     private let cursorStylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let ollamaEndpointField = NSTextField()
     private let ollamaModelField = NSTextField()
+    private let ollamaBehaviorPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let ollamaTestButton = NSButton(title: "Test Connection", target: nil, action: nil)
     private let claudeCLIPathField = NSTextField()
     private let claudeCLIStatusLabel = NSTextField(wrappingLabelWithString: "")
@@ -322,6 +323,13 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
         ollamaModelField.action = #selector(ollamaModelDidCommit(_:))
         root.addArrangedSubview(row(label: "Model", control: ollamaModelField))
 
+        for behavior in OllamaSuggestionBehavior.allCases {
+            ollamaBehaviorPopup.addItem(withTitle: behavior.displayName)
+        }
+        ollamaBehaviorPopup.target = self
+        ollamaBehaviorPopup.action = #selector(ollamaBehaviorDidChange(_:))
+        root.addArrangedSubview(row(label: "Command action", control: ollamaBehaviorPopup))
+
         ollamaTestButton.bezelStyle = .rounded
         ollamaTestButton.target = self
         ollamaTestButton.action = #selector(testOllamaConnection(_:))
@@ -604,6 +612,9 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
             ?? OllamaCommandService.defaultEndpoint
         ollamaModelField.stringValue = UserDefaults.standard.string(forKey: AppStorageKeys.ollamaModel)
             ?? OllamaCommandService.defaultModel
+        let behavior = OllamaSuggestionBehavior.current()
+        ollamaBehaviorPopup.selectItem(at: OllamaSuggestionBehavior.allCases.firstIndex(of: behavior) ?? 0)
+        ollamaBehaviorPopup.toolTip = behavior.helpText
     }
 
     private func loadClaudeCLISettingsIntoUI() {
@@ -619,6 +630,14 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
     @objc private func ollamaModelDidCommit(_ sender: Any?) {
         let trimmed = ollamaModelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         UserDefaults.standard.set(trimmed.isEmpty ? OllamaCommandService.defaultModel : trimmed, forKey: AppStorageKeys.ollamaModel)
+        loadOllamaSettingsIntoUI()
+    }
+
+    @objc private func ollamaBehaviorDidChange(_ sender: Any?) {
+        let index = ollamaBehaviorPopup.indexOfSelectedItem
+        guard OllamaSuggestionBehavior.allCases.indices.contains(index) else { return }
+        let behavior = OllamaSuggestionBehavior.allCases[index]
+        UserDefaults.standard.set(behavior.rawValue, forKey: AppStorageKeys.ollamaSuggestionBehavior)
         loadOllamaSettingsIntoUI()
     }
 

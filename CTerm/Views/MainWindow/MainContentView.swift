@@ -22,6 +22,7 @@ struct MainContentView: View {
     @AppStorage(AppStorageKeys.themeColorCustomHex) private var customHex = "#050D1C"
     @AppStorage(AppStorageKeys.ollamaModel) private var ollamaModel = OllamaCommandService.defaultModel
     @AppStorage(AppStorageKeys.ollamaEndpoint) private var ollamaEndpoint = OllamaCommandService.defaultEndpoint
+    @AppStorage(AppStorageKeys.ollamaSuggestionBehavior) private var ollamaSuggestionBehavior = OllamaSuggestionBehavior.defaultValue.rawValue
     private var secureInput: SecureInput { SecureInput.shared }
     @State private var ghosttyProvider = GhosttyThemeProvider.shared
 
@@ -427,6 +428,29 @@ private struct ComposeCommandBarView: View {
 
     @State private var gitBranch: String? = nil
 
+    private var currentOllamaSuggestionBehavior: OllamaSuggestionBehavior {
+        OllamaSuggestionBehavior(rawValue: ollamaSuggestionBehavior) ?? .defaultValue
+    }
+
+    private var composePlaceholderText: String {
+        guard assistant.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return assistant.placeholderText
+        }
+
+        switch assistant.mode {
+        case .ollamaCommand:
+            if !attachedBlockIDs.isEmpty {
+                return "Ask Ollama for the next command using the attached blocks..."
+            }
+            if shellError != nil {
+                return "Ask Ollama to fix the latest failed command..."
+            }
+            return assistant.placeholderText
+        default:
+            return assistant.placeholderText
+        }
+    }
+
     private var visibleCommandBlocks: [TerminalCommandBlock] {
         Array(commandBlocks.prefix(isExpanded ? 6 : 1))
     }
@@ -476,6 +500,13 @@ private struct ComposeCommandBarView: View {
                 )
             }
 
+            if let loadedEntry = assistant.loadedSuggestionEntry {
+                LoadedSuggestionBar(
+                    entry: loadedEntry,
+                    onRestorePrompt: { assistant.revertLoadedSuggestion() }
+                )
+            }
+
             contextHintBar
             HStack(alignment: .bottom, spacing: 8) {
                 modeSelectorButton
@@ -485,7 +516,8 @@ private struct ComposeCommandBarView: View {
                         onSend: onSend,
                         onDismiss: onDismiss,
                         onCmdReturn: forceAgentSend,
-                        placeholderText: assistant.placeholderText,
+                        onTabComplete: loadLatestSuggestionFromKeyboard,
+                        placeholderText: composePlaceholderText,
                         actions: windowActions
                     )
                     .frame(minHeight: 36, maxHeight: 96)
@@ -644,6 +676,15 @@ private struct ComposeCommandBarView: View {
                 onAction: { assistant.showAutoRouteHint = false }
             )
         }
+        if let loadedEntry = assistant.loadedSuggestionEntry {
+            return ContextHint(
+                text: "Ollama suggested this command — edit it or press ↩ to run",
+                icon: "wand.and.stars",
+                tint: .accentColor,
+                actionLabel: "Restore prompt",
+                onAction: { assistant.revertLoadedSuggestion() }
+            )
+        }
         if assistant.mode == .shell, shellError != nil {
             return ContextHint(
                 text: "Last command failed — ⌘↩ to fix",
@@ -711,7 +752,22 @@ private struct ComposeCommandBarView: View {
                 tint: .secondary
             )
         case .ollamaCommand:
-            return ContextHint(text: "↩ to ask Ollama to suggest or check a command", icon: "wand.and.stars", tint: .secondary)
+            let baseText = if !attachedBlockIDs.isEmpty {
+                "↩ to generate a command using the attached blocks"
+            } else if shellError != nil {
+                "↩ to generate a command using the latest failure"
+            } else {
+                "↩ to ask Ollama for a command suggestion"
+            }
+            let behaviorText = switch currentOllamaSuggestionBehavior {
+            case .suggestOnly:
+                "\(baseText) · Tab loads the latest suggestion"
+            case .autofill:
+                "\(baseText) and auto-fill high-confidence results"
+            case .autorunSafe:
+                "\(baseText) and auto-run low-risk results"
+            }
+            return ContextHint(text: behaviorText, icon: "wand.and.stars", tint: .secondary)
         case .ollamaAgent:
             return ContextHint(text: "↩ to start local agent loop", icon: "cpu", tint: .secondary)
         case .claudeAgent:
@@ -777,6 +833,14 @@ private struct ComposeCommandBarView: View {
     private func chipTint(for mode: ComposeAssistantMode, empty: Bool) -> Color {
         if empty { return .secondary.opacity(0.5) }
         return mode.isAgentMode ? .purple : .green
+    }
+
+    private func loadLatestSuggestionFromKeyboard() -> Bool {
+        guard assistant.loadedSuggestionEntry == nil,
+              let entry = assistant.latestRunnableEntry,
+              entry.kind == .commandSuggestion || entry.kind == .fixSuggestion
+        else { return false }
+        return assistant.loadDraft(from: entry.id)
     }
 
     private var selectableComposeModes: [ComposeAssistantMode] {
@@ -1235,6 +1299,42 @@ private struct AttachedBlocksBar: View {
             }
 
             Spacer()
+        }
+        .padding(.vertical, 5)
+        .background(Color.accentColor.opacity(0.05))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.accentColor.opacity(0.1)).frame(height: 1)
+        }
+    }
+}
+
+private struct LoadedSuggestionBar: View {
+    let entry: ComposeAssistantEntry
+    let onRestorePrompt: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 10))
+                .foregroundStyle(Color.accentColor)
+                .padding(.leading, 12)
+
+            Text("Suggested by Ollama")
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+
+            Text(entry.displayPrompt)
+                .font(.system(size: 10, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Spacer()
+
+            Button("Restore Prompt", action: onRestorePrompt)
+                .buttonStyle(.plain)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(Color.accentColor)
+                .padding(.trailing, 12)
         }
         .padding(.vertical, 5)
         .background(Color.accentColor.opacity(0.05))
