@@ -1136,7 +1136,7 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
 
     private func acceptActiveAISuggestion(_ suggestion: ActiveAISuggestion) {
         activeAIEngine.clear()
-        // Route to Claude agent
+        // Route to the active in-app agent loop.
         let mode = composeController.assistantState.mode
         if mode == .claudeAgent || mode == .ollamaAgent {
             _ = composeController.send(
@@ -1146,11 +1146,13 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
                 sendEnterKey: { [weak self] ctrl in self?.ipcController.onSendEnterKey?(ctrl) }
             )
         } else {
-            // Switch to claude agent mode and send
+            // Switch to Agent mode and start the in-app agent loop.
             composeController.assistantState.mode = .claudeAgent
-            _ = composeController.launchClaudeAgentWorkflow(
-                goal: suggestion.prompt,
-                activeTab: activeTab
+            _ = composeController.send(
+                suggestion.prompt,
+                activeTab: activeTab,
+                focusedController: focusedSurfaceController(),
+                sendEnterKey: { [weak self] ctrl in self?.ipcController.onSendEnterKey?(ctrl) }
             )
         }
         revealDedicatedAgentSidebar()

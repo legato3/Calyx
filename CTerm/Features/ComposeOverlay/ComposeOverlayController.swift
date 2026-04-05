@@ -114,6 +114,7 @@ final class ComposeOverlayController {
             activeTab?.clearAttachedBlocks()
             return startAgent(
                 goal: enrichedGoal,
+                backend: .ollama,
                 activeTab: activeTab,
                 focusedController: focusedController,
                 sendEnterKey: sendEnterKey
@@ -121,7 +122,13 @@ final class ComposeOverlayController {
         case .claudeAgent:
             let enriched = AgentPromptContextBuilder.buildPrompt(goal: trimmed, activeTab: activeTab)
             activeTab?.clearAttachedBlocks()
-            return launchClaudeAgentWorkflow(goal: enriched, activeTab: activeTab)
+            return startAgent(
+                goal: enriched,
+                backend: .claudeSubscription,
+                activeTab: activeTab,
+                focusedController: focusedController,
+                sendEnterKey: sendEnterKey
+            )
         }
     }
 
@@ -400,6 +407,7 @@ final class ComposeOverlayController {
 
     private func startAgent(
         goal: String,
+        backend: AgentPlanningBackend,
         activeTab: Tab?,
         focusedController: GhosttySurfaceController?,
         sendEnterKey: @escaping (GhosttySurfaceController) -> Void
@@ -409,7 +417,7 @@ final class ComposeOverlayController {
         // Store for auto-dispatch of safe commands.
         agentTargetController = focusedController
         agentSendEnterKey = sendEnterKey
-        activeTab.startOllamaAgent(goal: goal)
+        activeTab.startOllamaAgent(goal: goal, backend: backend)
         assistantState.setDraftText("")
         onStateChanged?()
         planNextAgentStep(for: activeTab)
@@ -432,6 +440,7 @@ final class ComposeOverlayController {
         let sessionID = session.id
         let tabID = activeTab.id
         let goal = session.goal
+        let backend = session.backend
         let pwd = activeTab.pwd
         let recentCommandContext = agentRecentCommandContext(for: activeTab)
         let priorAgentContext = agentPriorContext(for: session)
@@ -450,6 +459,7 @@ final class ComposeOverlayController {
             do {
                 let decision = try await OllamaCommandService.streamAgentDecision(
                     goal: goal,
+                    backend: backend,
                     pwd: pwd,
                     recentCommandContext: recentCommandContext,
                     priorAgentContext: priorAgentContext

@@ -631,9 +631,9 @@ private struct ComposeCommandBarView: View {
             let intent = assistant.detectedIntent
             if intent == .agent {
                 return ContextHint(
-                    text: "Looks like a prompt — ⌘↩ to send to Claude",
+                    text: "Looks like a prompt — ⌘↩ to send to Agent",
                     icon: "sparkles", tint: .purple,
-                    actionLabel: "Use Claude", onAction: { assistant.mode = .claudeAgent }
+                    actionLabel: "Use Agent", onAction: { assistant.mode = .claudeAgent }
                 )
             }
             return ContextHint(text: "↩ to run  ·  Shift-↩ for newline", tint: .secondary)
@@ -646,11 +646,11 @@ private struct ComposeCommandBarView: View {
                 tint: .secondary
             )
         case .ollamaCommand:
-            return ContextHint(text: "↩ to ask Ollama for a command", icon: "wand.and.stars", tint: .secondary)
+            return ContextHint(text: "↩ to ask Ollama to suggest or check a command", icon: "wand.and.stars", tint: .secondary)
         case .ollamaAgent:
             return ContextHint(text: "↩ to start local agent loop", icon: "cpu", tint: .secondary)
         case .claudeAgent:
-            return ContextHint(text: "↩ to launch Claude Code agent in a new tab", icon: "sparkles", tint: .purple)
+            return ContextHint(text: "↩ to start Agent with Claude Subscription", icon: "sparkles", tint: .purple)
         }
     }
 
@@ -658,7 +658,7 @@ private struct ComposeCommandBarView: View {
 
     private var modeSelectorButton: some View {
         Menu {
-            ForEach(ComposeAssistantMode.allCases) { mode in
+            ForEach(selectableComposeModes) { mode in
                 Button { assistant.mode = mode } label: {
                     Label(mode.displayName, systemImage: modeIcon(mode))
                 }
@@ -675,6 +675,10 @@ private struct ComposeCommandBarView: View {
         .menuStyle(.borderlessButton)
         .frame(width: 28, height: 28)
         .help("Switch input mode (\(assistant.mode.displayName))")
+    }
+
+    private var selectableComposeModes: [ComposeAssistantMode] {
+        ComposeAssistantMode.allCases.filter { $0 != .ollamaAgent }
     }
 
     private func modeIcon(_ mode: ComposeAssistantMode) -> String {

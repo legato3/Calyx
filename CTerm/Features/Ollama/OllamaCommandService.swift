@@ -4,7 +4,7 @@ enum ComposeAssistantMode: String, CaseIterable, Identifiable, Sendable {
     case shell
     case ollamaCommand
     case ollamaAgent
-    /// Claude Code / Codex agent via IPC MCP workflow
+    /// Claude Subscription-backed agent workflow via the local Claude client.
     case claudeAgent
 
     var id: String { rawValue }
@@ -13,8 +13,8 @@ enum ComposeAssistantMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .shell: return "Shell"
         case .ollamaCommand: return "Ollama"
-        case .ollamaAgent: return "Agent"
-        case .claudeAgent: return "Claude"
+        case .ollamaAgent: return "Local Agent"
+        case .claudeAgent: return "Agent"
         }
     }
 
@@ -23,11 +23,11 @@ enum ComposeAssistantMode: String, CaseIterable, Identifiable, Sendable {
         case .shell:
             return "Type a shell command..."
         case .ollamaCommand:
-            return "Describe what you want to do..."
+            return "Ask Ollama to suggest or check a terminal command..."
         case .ollamaAgent:
             return "Describe the task for the local agent..."
         case .claudeAgent:
-            return "Ask Claude to build, fix, or explain something..."
+            return "Ask Agent (Claude Subscription) to build, fix, or explain something..."
         }
     }
 
@@ -248,7 +248,11 @@ final class ComposeAssistantState {
 
     init() {
         let raw = UserDefaults.standard.string(forKey: AppStorageKeys.composeAssistantMode) ?? ComposeAssistantMode.shell.rawValue
-        self.mode = ComposeAssistantMode(rawValue: raw) ?? .shell
+        if raw == ComposeAssistantMode.ollamaAgent.rawValue {
+            self.mode = .claudeAgent
+        } else {
+            self.mode = ComposeAssistantMode(rawValue: raw) ?? .shell
+        }
     }
 
     var placeholderText: String { mode.placeholderText }
@@ -588,11 +592,22 @@ enum OllamaCommandService {
 
     static func streamAgentDecision(
         goal: String,
+        backend: AgentPlanningBackend = .ollama,
         pwd: String?,
         recentCommandContext: String,
         priorAgentContext: String,
         onPartial: @escaping @MainActor @Sendable (String) -> Void
     ) async throws -> OllamaAgentDecision {
+        if backend == .claudeSubscription {
+            return try await streamClaudeAgentDecision(
+                goal: goal,
+                pwd: pwd,
+                recentCommandContext: recentCommandContext,
+                priorAgentContext: priorAgentContext,
+                onPartial: onPartial
+            )
+        }
+
         let context = await TerminalContextGatherer.gather(pwd: pwd)
         let prompt = buildAgentPrompt(
             goal: goal,
@@ -601,6 +616,25 @@ enum OllamaCommandService {
             priorAgentContext: priorAgentContext
         )
         let raw = try await streamPrompt(prompt, temperature: 0.2, onPartial: onPartial)
+        return try parseAgentDecision(raw)
+    }
+
+    private static func streamClaudeAgentDecision(
+        goal: String,
+        pwd: String?,
+        recentCommandContext: String,
+        priorAgentContext: String,
+        onPartial: @escaping @MainActor @Sendable (String) -> Void
+    ) async throws -> OllamaAgentDecision {
+        let context = await TerminalContextGatherer.gather(pwd: pwd)
+        let prompt = buildClaudeAgentPrompt(
+            goal: goal,
+            context: context,
+            recentCommandContext: recentCommandContext,
+            priorAgentContext: priorAgentContext
+        )
+        await onPartial("Planning the next terminal step with Claude Subscription…")
+        let raw = try await runClaudePrompt(prompt, cwd: pwd)
         return try parseAgentDecision(raw)
     }
 
@@ -635,6 +669,21 @@ enum OllamaCommandService {
             throw OllamaCommandServiceError.invalidResponse
         }
         return cleaned
+    }
+
+    private static func runClaudePrompt(_ prompt: String, cwd: String?) async throws -> String {
+        do {
+            let output = try await ClaudeCLIService.runPrintPrompt(
+                prompt,
+                cwd: cwd,
+                timeout: requestTimeout
+            )
+            return cleanResponse(output)
+        } catch let error as ClaudeCLIServiceError {
+            throw OllamaCommandServiceError.transport(error.localizedDescription)
+        } catch {
+            throw OllamaCommandServiceError.transport(error.localizedDescription)
+        }
     }
 
     private static func streamPrompt(
@@ -820,6 +869,45 @@ enum OllamaCommandService {
     ) -> String {
         return """
         You are CTerm Agent, a local terminal agent embedded in a macOS terminal app.
+
+        Decide the next terminal action for the user's goal.
+
+        Rules:
+        - Prefer one shell command per step.
+        - Only propose commands that are necessary for progress.
+        - Do not propose destructive commands unless the goal clearly requires them.
+        - If the goal is complete, respond with ACTION: DONE.
+        - If a command is needed, respond with ACTION: RUN.
+        - Use exactly this format:
+          ACTION: RUN
+          COMMAND: <single shell command>
+          MESSAGE: <one concise sentence about why this is the next step>
+
+          or:
+          ACTION: DONE
+          MESSAGE: <one concise sentence summarizing the result or next manual step>
+        - Do not use markdown fences or bullet lists.
+
+        Context:
+        \(context.contextBlock)
+        - Goal: \(goal)
+
+        Recent command history:
+        \(recentCommandContext.isEmpty ? "(none)" : recentCommandContext)
+
+        Previous agent state:
+        \(priorAgentContext.isEmpty ? "(none)" : priorAgentContext)
+        """
+    }
+
+    private static func buildClaudeAgentPrompt(
+        goal: String,
+        context: TerminalContext,
+        recentCommandContext: String,
+        priorAgentContext: String
+    ) -> String {
+        """
+        You are CTerm Agent, a terminal agent embedded in a macOS terminal app and powered by Claude Subscription.
 
         Decide the next terminal action for the user's goal.
 

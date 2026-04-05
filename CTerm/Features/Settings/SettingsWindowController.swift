@@ -34,6 +34,12 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
     private let ollamaEndpointField = NSTextField()
     private let ollamaModelField = NSTextField()
     private let ollamaTestButton = NSButton(title: "Test Connection", target: nil, action: nil)
+    private let claudeCLIPathField = NSTextField()
+    private let claudeCLIStatusLabel = NSTextField(wrappingLabelWithString: "")
+    private let claudeCLICheckButton = NSButton(title: "Check Status", target: nil, action: nil)
+    private let claudeCLILoginButton = NSButton(title: "Start Login", target: nil, action: nil)
+    private let claudeCLIBrowseButton = NSButton(title: "Browse", target: nil, action: nil)
+    private let claudeCLIResetButton = NSButton(title: "Reset", target: nil, action: nil)
 
     // MARK: - Terminal overrides persistence
     private var terminalOverrides: [String: String] {
@@ -321,6 +327,58 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
         ollamaTestButton.action = #selector(testOllamaConnection(_:))
         root.addArrangedSubview(row(label: "", control: ollamaTestButton))
 
+        let claudeDivider = NSBox()
+        claudeDivider.boxType = .separator
+        claudeDivider.translatesAutoresizingMaskIntoConstraints = false
+        claudeDivider.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        root.addArrangedSubview(claudeDivider)
+
+        let claudeTitle = NSTextField(labelWithString: "Claude CLI")
+        claudeTitle.font = .systemFont(ofSize: 20, weight: .semibold)
+        root.addArrangedSubview(claudeTitle)
+
+        let claudeSubtitle = NSTextField(wrappingLabelWithString: "Agent mode uses the local Claude Subscription CLI for Warp-style planning. Configure an optional path override, check login status, or open an in-app login tab.")
+        claudeSubtitle.textColor = .secondaryLabelColor
+        claudeSubtitle.font = .systemFont(ofSize: 13)
+        root.addArrangedSubview(claudeSubtitle)
+
+        claudeCLIPathField.placeholderString = "Auto-detect `claude` from PATH or standard install locations"
+        claudeCLIPathField.delegate = self
+        claudeCLIPathField.target = self
+        claudeCLIPathField.action = #selector(claudeCLIPathDidCommit(_:))
+        root.addArrangedSubview(row(label: "Executable", control: claudeCLIPathField))
+
+        claudeCLIStatusLabel.font = .systemFont(ofSize: 12)
+        claudeCLIStatusLabel.textColor = .secondaryLabelColor
+        root.addArrangedSubview(row(label: "Status", control: claudeCLIStatusLabel))
+
+        claudeCLICheckButton.bezelStyle = .rounded
+        claudeCLICheckButton.target = self
+        claudeCLICheckButton.action = #selector(refreshClaudeCLIStatus(_:))
+
+        claudeCLILoginButton.bezelStyle = .rounded
+        claudeCLILoginButton.target = self
+        claudeCLILoginButton.action = #selector(startClaudeCLILogin(_:))
+
+        claudeCLIBrowseButton.bezelStyle = .rounded
+        claudeCLIBrowseButton.target = self
+        claudeCLIBrowseButton.action = #selector(browseClaudeCLIPath(_:))
+
+        claudeCLIResetButton.bezelStyle = .rounded
+        claudeCLIResetButton.target = self
+        claudeCLIResetButton.action = #selector(resetClaudeCLIPath(_:))
+
+        let claudeActions = NSStackView(views: [
+            claudeCLICheckButton,
+            claudeCLILoginButton,
+            claudeCLIBrowseButton,
+            claudeCLIResetButton,
+        ])
+        claudeActions.orientation = .horizontal
+        claudeActions.spacing = 8
+        claudeActions.alignment = .centerY
+        root.addArrangedSubview(row(label: "", control: claudeActions))
+
         // --- Scrolling Section ---
         let scrollingDivider = NSBox()
         scrollingDivider.boxType = .separator
@@ -369,6 +427,8 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
         loadPresetIntoUI()
         loadTerminalSettingsIntoUI()
         loadOllamaSettingsIntoUI()
+        loadClaudeCLISettingsIntoUI()
+        refreshClaudeCLIHealth()
     }
 
     /// Checks for unsaved changes before app termination.
@@ -408,6 +468,8 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
         loadPresetIntoUI()
         loadTerminalSettingsIntoUI()
         loadOllamaSettingsIntoUI()
+        loadClaudeCLISettingsIntoUI()
+        refreshClaudeCLIHealth()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
     }
@@ -544,6 +606,10 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
             ?? OllamaCommandService.defaultModel
     }
 
+    private func loadClaudeCLISettingsIntoUI() {
+        claudeCLIPathField.stringValue = UserDefaults.standard.string(forKey: AppStorageKeys.claudeCLIPath) ?? ""
+    }
+
     @objc private func ollamaEndpointDidCommit(_ sender: Any?) {
         let trimmed = ollamaEndpointField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         UserDefaults.standard.set(trimmed.isEmpty ? OllamaCommandService.defaultEndpoint : trimmed, forKey: AppStorageKeys.ollamaEndpoint)
@@ -554,6 +620,17 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
         let trimmed = ollamaModelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         UserDefaults.standard.set(trimmed.isEmpty ? OllamaCommandService.defaultModel : trimmed, forKey: AppStorageKeys.ollamaModel)
         loadOllamaSettingsIntoUI()
+    }
+
+    @objc private func claudeCLIPathDidCommit(_ sender: Any?) {
+        let trimmed = claudeCLIPathField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            UserDefaults.standard.removeObject(forKey: AppStorageKeys.claudeCLIPath)
+        } else {
+            UserDefaults.standard.set(trimmed, forKey: AppStorageKeys.claudeCLIPath)
+        }
+        loadClaudeCLISettingsIntoUI()
+        refreshClaudeCLIHealth()
     }
 
     @objc private func testOllamaConnection(_ sender: Any?) {
@@ -591,6 +668,52 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
         }
     }
 
+    @objc private func refreshClaudeCLIStatus(_ sender: Any?) {
+        claudeCLIPathDidCommit(sender)
+    }
+
+    @objc private func startClaudeCLILogin(_ sender: Any?) {
+        do {
+            try ClaudeCLIService.startLoginInCTerm()
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Claude login could not start"
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "OK")
+            if let window = self.window {
+                alert.beginSheetModal(for: window)
+            } else {
+                alert.runModal()
+            }
+        }
+    }
+
+    @objc private func browseClaudeCLIPath(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Select Claude CLI"
+
+        if let window = self.window {
+            panel.beginSheetModal(for: window) { [weak self] response in
+                guard response == .OK, let url = panel.url else { return }
+                self?.claudeCLIPathField.stringValue = url.path
+                self?.claudeCLIPathDidCommit(sender)
+            }
+        } else if panel.runModal() == .OK, let url = panel.url {
+            claudeCLIPathField.stringValue = url.path
+            claudeCLIPathDidCommit(sender)
+        }
+    }
+
+    @objc private func resetClaudeCLIPath(_ sender: Any?) {
+        UserDefaults.standard.removeObject(forKey: AppStorageKeys.claudeCLIPath)
+        loadClaudeCLISettingsIntoUI()
+        refreshClaudeCLIHealth()
+    }
+
     func controlTextDidEndEditing(_ obj: Notification) {
         guard let field = obj.object as? NSTextField else { return }
 
@@ -598,6 +721,26 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
             ollamaEndpointDidCommit(field)
         } else if field === ollamaModelField {
             ollamaModelDidCommit(field)
+        } else if field === claudeCLIPathField {
+            claudeCLIPathDidCommit(field)
+        }
+    }
+
+    private func refreshClaudeCLIHealth() {
+        let pathOverride = claudeCLIPathField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveOverride = pathOverride.isEmpty ? nil : pathOverride
+
+        claudeCLICheckButton.isEnabled = false
+        claudeCLICheckButton.title = "Checking..."
+        claudeCLIStatusLabel.stringValue = "Checking Claude CLI status…"
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let health = await ClaudeCLIService.healthCheck(pathOverride: effectiveOverride)
+            self.claudeCLICheckButton.isEnabled = true
+            self.claudeCLICheckButton.title = "Check Status"
+            self.claudeCLIStatusLabel.stringValue = health.summaryText
+            self.claudeCLILoginButton.isEnabled = health.isInstalled
         }
     }
 

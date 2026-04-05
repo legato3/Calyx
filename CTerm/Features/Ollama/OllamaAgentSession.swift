@@ -1,5 +1,10 @@
 import Foundation
 
+enum AgentPlanningBackend: String, Sendable {
+    case ollama
+    case claudeSubscription
+}
+
 enum OllamaAgentStatus: String, Sendable {
     case planning
     case awaitingApproval
@@ -74,6 +79,7 @@ struct OllamaAgentStep: Identifiable, Sendable {
 struct OllamaAgentSession: Identifiable, Sendable {
     let id: UUID
     let goal: String
+    let backend: AgentPlanningBackend
     var status: OllamaAgentStatus
     var pendingCommand: String?
     var pendingMessage: String?
@@ -83,10 +89,11 @@ struct OllamaAgentSession: Identifiable, Sendable {
     var updatedAt: Date
     var steps: [OllamaAgentStep]
 
-    init(goal: String) {
+    init(goal: String, backend: AgentPlanningBackend) {
         let now = Date()
         self.id = UUID()
         self.goal = goal
+        self.backend = backend
         self.status = .planning
         self.pendingCommand = nil
         self.pendingMessage = nil
@@ -110,8 +117,8 @@ struct OllamaAgentSession: Identifiable, Sendable {
 }
 
 extension Tab {
-    func startOllamaAgent(goal: String) {
-        ollamaAgentSession = OllamaAgentSession(goal: goal)
+    func startOllamaAgent(goal: String, backend: AgentPlanningBackend) {
+        ollamaAgentSession = OllamaAgentSession(goal: goal, backend: backend)
     }
 
     func updateOllamaAgentPlanPreview(_ text: String) {

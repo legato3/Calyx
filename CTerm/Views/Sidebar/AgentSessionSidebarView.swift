@@ -16,11 +16,11 @@ struct AgentSessionSidebarView: View {
     private var titleText: String {
         switch assistant.mode {
         case .claudeAgent:
-            return "Claude Agent"
+            return "Agent"
         case .ollamaAgent:
             return "Local Agent"
         case .ollamaCommand:
-            return "Assistant"
+            return "Ollama"
         case .shell:
             return "Agent"
         }
@@ -29,13 +29,13 @@ struct AgentSessionSidebarView: View {
     private var subtitleText: String {
         switch assistant.mode {
         case .claudeAgent:
-            return "Dedicated workflow for long-running agent tasks."
+            return "Claude Subscription-backed workflow for long-running agent tasks."
         case .ollamaAgent:
             return "Plan, approvals, and execution stay here."
         case .ollamaCommand:
-            return "Suggestions and explanations from the assistant."
+            return "Remote command suggestions and command-check assistance."
         case .shell:
-            return "Switch the input mode to Claude or Agent to start."
+            return "Switch the input mode to Agent or Ollama to start."
         }
     }
 
@@ -155,7 +155,7 @@ struct AgentSessionSidebarView: View {
             Text("No active agent session")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
 
-            Text("Use the input bar below to start Claude or the local agent. This sidebar stays dedicated to the plan, approvals, and assistant output.")
+            Text("Use the input bar below to start Agent or ask Ollama for command help. This sidebar stays dedicated to plans, approvals, and assistant output.")
                 .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

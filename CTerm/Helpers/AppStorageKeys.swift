@@ -13,6 +13,7 @@ enum AppStorageKeys {
     static let ghosttyTerminalOverrides = "ghosttyTerminalOverrides"
     static let ollamaEndpoint = "ollamaEndpoint"
     static let ollamaModel = "ollamaModel"
+    static let claudeCLIPath = "claudeCLIPath"
     static let composeAssistantMode = "composeAssistantMode"
     // Active AI features
     static let activeAIEnabled = "activeAIEnabled"
