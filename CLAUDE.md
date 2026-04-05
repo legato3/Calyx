@@ -81,7 +81,7 @@ AppDelegate
 
 - **`@MainActor` everywhere** — all UI and model code is `@MainActor`. Never dispatch UI work off the main actor.
 - **All ghostty C API calls go through `GhosttyFFI`** (`CTerm/GhosttyBridge/GhosttyFFI.swift`). This is a thin enum of static wrapper methods — no business logic there.
-- **NotificationCenter remains the event bus** — notification payload decoding should go through the typed wrappers in `CTerm/GhosttyBridge/GhosttyNotificationEvents.swift`. Do not add new raw `userInfo` parsing in controllers.
+- **NotificationCenter remains the event bus** — notification payload decoding should go through the typed wrappers in `CTerm/GhosttyBridge/GhosttyNotificationEvents.swift`. Do not add new raw `userInfo` parsing in controllers. **Exception:** agent session lifecycle events (phase changes, approvals, artifacts, completion) flow through the typed `AgentSessionObserver` protocol instead of `NotificationCenter`. Subscribe to sessions via `session.addObserver(self)`.
 - **`WindowActions` replaces the old closure explosion** — view-to-controller actions are injected through the SwiftUI environment from `CTermWindowController`.
 - **`GhosttyAppController.shared`** is the singleton that owns `ghostty_app_t`, manages config reload, and handles C callbacks from libghostty.
 - **No force unwraps, force casts, or `try!` in production code.** Keep it that way.
@@ -98,7 +98,7 @@ AppDelegate
 - `CTerm/App/` — `AppDelegate`, `main.swift`
 - `CTerm/GhosttyBridge/` — all ghostty integration: `GhosttyFFI`, `GhosttyApp`, `GhosttyConfig`, `GhosttySurface`, `SurfaceView`, `MetalView`, config watcher/reloader, event translation
 - `CTerm/Models/` — data model: `AppSession`, `WindowSession`, `TabGroup`, `Tab`, `SplitTree`, `SurfaceRegistry`, `ThemeColor`
-- `CTerm/Views/` — SwiftUI views organized by area: `MainWindow/`, `Sidebar/`, `TabBar/`, `Split/`, `Browser/`, `Git/`, `Glass/`
+- `CTerm/Views/` — SwiftUI views organized by area: `MainWindow/`, `Sidebar/`, `TabBar/`, `Split/`, `Browser/`, `Git/`, `Glass/`, `Agent/` (run panel + activity strip + finding cards), `Approval/` (approval sheet + scope picker)
 - `CTerm/Features/` — self-contained feature modules: `ActiveAI/`, `AgentLoop/`, `AgentMemory/`, `AgentPermissions/`, `AgentPlan/`, `AgentSession/`, `Audit/`, `Browser/`, `CommandPalette/`, `ComposeOverlay/`, `Delegation/`, `Git/`, `IPC/`, `Notifications/`, `Ollama/`, `Persistence/`, `QuickTerminal/`, `Search/`, `SecureInput/`, `Settings/`, `TaskQueue/`, `TerminalSearch/`, `TestRunner/`, `TriggerEngine/`, `Usage/`
 - `CTerm/Input/` — global event tap, shortcut manager
 - `CTerm/Helpers/` — utilities
