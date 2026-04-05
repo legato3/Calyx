@@ -58,6 +58,12 @@ final class AgentSessionRegistry {
             .sorted { $0.startedAt > $1.startedAt }
     }
 
+    /// Most recently-started non-terminal session attached to the tab.
+    /// Drives the run panel selection for the active tab.
+    func activeSession(forTab tabID: UUID) -> AgentSession? {
+        sessions(forTab: tabID).first { !$0.phase.isTerminal }
+    }
+
     // MARK: - Test / reset hook
 
     #if DEBUG

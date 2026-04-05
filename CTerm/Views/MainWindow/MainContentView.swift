@@ -165,6 +165,19 @@ struct MainContentView: View {
                                     }
                                 }
 
+                                // Agent run panel — appears between terminal
+                                // and compose bar whenever the active tab has
+                                // a non-terminal AgentSession.
+                                AgentRunPanelRegion(
+                                    activeTab: activeTab,
+                                    onApprove: { _ = actions.onApproveOllamaAgent?() },
+                                    onStop: { actions.onStopOllamaAgent?() },
+                                    onDeny: { actions.onStopOllamaAgent?() },
+                                    onDismiss: {
+                                        activeTab?.ollamaAgentSession = nil
+                                    }
+                                )
+
                                 if let assistant = actions.composeAssistantState {
                                     VStack(spacing: 0) {
                                         if windowSession.showComposeOverlay {
@@ -410,10 +423,17 @@ private struct ComposeCommandBarView: View {
 
     // MARK: - Warp-style Input Bar
 
+    /// True when an agent session is driving the run panel (chips hide).
+    private var hasActiveSession: Bool {
+        if let s = agentSession, !s.phase.isTerminal { return true }
+        return false
+    }
+
     private var warpInputBar: some View {
         VStack(spacing: 0) {
-            // Active AI suggestion chips
-            if !activeAISuggestions.isEmpty {
+            // Active AI suggestion chips — hidden while a session is active
+            // (the run panel is the primary surface then).
+            if !activeAISuggestions.isEmpty && !hasActiveSession {
                 ActiveAISuggestionBar(
                     suggestions: activeAISuggestions,
                     onAccept: { onAcceptSuggestion?($0) },

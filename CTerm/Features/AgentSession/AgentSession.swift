@@ -91,6 +91,10 @@ final class AgentSession: Identifiable {
     /// user answers, so the driver can continue where it left off.
     var onApprovalResolved: (() -> Void)?
 
+    /// UI state: has the user collapsed the inline run panel for this session?
+    /// Session-lifetime only, not persisted.
+    var isRunPanelCollapsed: Bool = false
+
     // MARK: - Observers
 
     private var observers: [WeakObserver] = []
