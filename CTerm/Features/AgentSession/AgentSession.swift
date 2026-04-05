@@ -94,7 +94,7 @@ final class AgentSession: Identifiable {
     /// Optional resume callback set by a session driver (executor, inline loop,
     /// etc.) before calling `requestApproval`. Invoked by the presenter once the
     /// user answers, so the driver can continue where it left off.
-    var onApprovalResolved: (() -> Void)?
+    var onApprovalResolved: ((ApprovalAnswer) -> Void)?
 
     /// UI state: has the user collapsed the inline run panel for this session?
     /// Session-lifetime only, not persisted.

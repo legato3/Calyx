@@ -235,19 +235,6 @@ final class TriggerEngine {
         switch action {
         case .routeToClaude:
             let message = interpolate(rule.actionMessage.isEmpty ? defaultMessage(for: rule.triggerType, context: context) : rule.actionMessage, context: context)
-            // Spawn a real AgentSession tagged with the rule name so the user
-            // can see "⚡ via <rule>" in the run panel + activity strip and
-            // trace back why the action happened.
-            Task { @MainActor in
-                _ = AgentSessionRouter.shared.start(
-                    AgentSessionRequest(
-                        intent: message,
-                        kind: .inline,
-                        backend: .claudeSubscription,
-                        triggeredBy: rule.name
-                    )
-                )
-            }
             TerminalControlBridge.shared.routeToNearestAgentPaneOrActive(text: message)
             SessionAuditLogger.log(type: .triggerFired, detail: "'\(rule.name)' → route: \(message.prefix(80))")
 

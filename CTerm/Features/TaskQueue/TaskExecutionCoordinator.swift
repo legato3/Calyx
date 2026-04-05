@@ -92,17 +92,27 @@ final class TaskExecutionCoordinator {
         guard task.phase.canPause else { return }
         task.transitionTo(.paused)
         if task.id == activeTask?.id {
-            // Pause the agent session
-            agentCoordinator.activeSession?.transition(to: .completed)
+            // Freeze task/session mirroring without terminalizing the underlying run.
+            syncTask?.cancel()
+            syncTask = nil
         }
     }
 
     func resumeTask(_ task: ManagedTask) {
         guard task.phase == .paused else { return }
-        task.transitionTo(.executing)
-        if task.id == activeTask?.id {
-            executeTask(task)
+        if task.id == activeTask?.id,
+           let session = task.agentSession,
+           session.id == agentCoordinator.activeSession?.id,
+           !session.phase.isTerminal {
+            syncTaskFromSession(task, allowPausedUpdate: true)
+            if !task.phase.isTerminal {
+                startSessionSync(for: task)
+            }
+            return
         }
+
+        task.transitionTo(.executing)
+        executeTask(task)
     }
 
     func cancelTask(_ task: ManagedTask) {
@@ -277,13 +287,17 @@ final class TaskExecutionCoordinator {
         }
     }
 
-    private func syncTaskFromSession(_ task: ManagedTask) {
+    private func syncTaskFromSession(_ task: ManagedTask, allowPausedUpdate: Bool = false) {
         guard let session = agentCoordinator.activeSession else { return }
         task.agentSession = session
 
         // Sync plan steps
         task.planSteps = session.planSteps
         task.streamingPreview = agentCoordinator.streamingPreview
+
+        if task.phase == .paused && !allowPausedUpdate {
+            return
+        }
 
         // Map agent phase → task phase
         switch session.phase {
@@ -300,6 +314,11 @@ final class TaskExecutionCoordinator {
         case .completed:
             task.summary = session.summary
             task.nextActions = session.nextActions
+            if task.phase == .paused {
+                task.transitionTo(.summarizing)
+            } else if task.phase != .summarizing {
+                task.transitionTo(.summarizing)
+            }
             task.transitionTo(.completed)
         case .failed:
             task.fail(message: session.errorMessage ?? "Agent session failed")

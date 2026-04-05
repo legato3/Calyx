@@ -100,16 +100,17 @@ final class ApprovalPresenter: AgentSessionObserver {
             )
         }
 
+        let resume = session.onApprovalResolved
+
         session.resolveApproval(decision: answer, scope: scope)
         session.clearApproval()
 
-        let resume = session.onApprovalResolved
         pendingSession = nil
         pendingContext = nil
         pendingHardStop = nil
         pendingRepoPath = nil
 
-        resume?()
+        resume?(answer)
     }
 
     /// Cancel without a grant — also resumes the driver so it can move on.

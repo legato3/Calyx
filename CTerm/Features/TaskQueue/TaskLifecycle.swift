@@ -85,7 +85,7 @@ enum TaskPhase: String, Sendable, Codable {
         case .planning:         return [.awaitingApproval, .executing, .failed, .cancelled]
         case .awaitingApproval: return [.executing, .cancelled]
         case .executing:        return [.observing, .paused, .summarizing, .failed, .cancelled]
-        case .paused:           return [.executing, .cancelled]
+        case .paused:           return [.awaitingApproval, .executing, .summarizing, .failed, .cancelled]
         case .observing:        return [.executing, .summarizing, .failed, .cancelled]
         case .summarizing:      return [.completed, .failed]
         case .completed:        return []

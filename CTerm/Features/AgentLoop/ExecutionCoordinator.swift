@@ -336,10 +336,9 @@ final class ExecutionCoordinator {
         if let hardStop { ApprovalPresenter.shared.presentHardStop(reason: hardStop) }
 
         // Wire resume. Executor picks up after the user answers.
-        session.onApprovalResolved = { [weak self] in
+        session.onApprovalResolved = { [weak self] answer in
             guard let self else { return }
             self.session.onApprovalResolved = nil
-            let answer = self.session.approval?.decision ?? .deferred
             if answer == .approved {
                 // Re-enter executeLocalShell; grant cache should now cover it.
                 plan.steps[index].status = .approved
