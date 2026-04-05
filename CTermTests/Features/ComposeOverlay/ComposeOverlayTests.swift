@@ -345,3 +345,77 @@ final class ComposeOverlayControllerAgentLaunchTests: XCTestCase {
         XCTAssertEqual(capturedEvent?.runtime.preset, .claudeCode)
     }
 }
+
+// MARK: - Inline Agent Completion Heuristics
+
+@MainActor
+final class InlineAgentCompletionHeuristicsTests: XCTestCase {
+
+    func test_shouldNotShortCircuit_systemTroubleshootingGoal_afterFirstSuccess() {
+        let session = AgentSession(
+            intent: "troubleshoot my mac",
+            rawPrompt: "troubleshoot my mac",
+            tabID: nil,
+            kind: .inline,
+            backend: .claudeSubscription
+        )
+        session.inlineSteps = [
+            InlineAgentStep(kind: .command, text: "Run a first diagnostic", command: "sw_vers"),
+        ]
+        let block = TerminalCommandBlock(
+            id: UUID(),
+            source: .assistant,
+            surfaceID: nil,
+            command: "sw_vers",
+            startedAt: Date(),
+            finishedAt: Date(),
+            status: .succeeded,
+            outputSnippet: "ProductName: macOS",
+            errorSnippet: nil,
+            exitCode: 0,
+            durationNanoseconds: 100_000_000
+        )
+
+        let result = InlineAgentCompletionHeuristics.shouldShortCircuitFirstSuccess(
+            intent: session.intent,
+            session: session,
+            block: block
+        )
+
+        XCTAssertFalse(result)
+    }
+
+    func test_shouldShortCircuit_simpleInspectGoal_afterFirstSuccess() {
+        let session = AgentSession(
+            intent: "list files",
+            rawPrompt: "list files",
+            tabID: nil,
+            kind: .inline,
+            backend: .claudeSubscription
+        )
+        session.inlineSteps = [
+            InlineAgentStep(kind: .command, text: "List files", command: "ls"),
+        ]
+        let block = TerminalCommandBlock(
+            id: UUID(),
+            source: .assistant,
+            surfaceID: nil,
+            command: "ls",
+            startedAt: Date(),
+            finishedAt: Date(),
+            status: .succeeded,
+            outputSnippet: "CTerm\nCTermTests",
+            errorSnippet: nil,
+            exitCode: 0,
+            durationNanoseconds: 100_000_000
+        )
+
+        let result = InlineAgentCompletionHeuristics.shouldShortCircuitFirstSuccess(
+            intent: session.intent,
+            session: session,
+            block: block
+        )
+
+        XCTAssertTrue(result)
+    }
+}

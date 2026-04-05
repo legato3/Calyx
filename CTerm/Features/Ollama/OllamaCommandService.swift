@@ -1193,6 +1193,7 @@ enum OllamaCommandService {
         recentCommandContext: String,
         priorAgentContext: String
     ) -> String {
+        let diagnosticGuidance = buildDiagnosticGuidance(goal: goal, scope: scope)
         return """
         You are CTerm Agent, a local terminal agent embedded in a macOS terminal app.
 
@@ -1215,6 +1216,7 @@ enum OllamaCommandService {
           ACTION: DONE
           MESSAGE: <one concise sentence summarizing the result or next manual step>
         - Do not use markdown fences or bullet lists.
+        \(diagnosticGuidance)
 
         Context:
         \(context.contextBlock)
@@ -1236,7 +1238,8 @@ enum OllamaCommandService {
         recentCommandContext: String,
         priorAgentContext: String
     ) -> String {
-        """
+        let diagnosticGuidance = buildDiagnosticGuidance(goal: goal, scope: scope)
+        return """
         You are CTerm Agent, a terminal agent embedded in a macOS terminal app and powered by Claude Subscription.
 
         Decide the next terminal action for the user's goal.
@@ -1258,6 +1261,7 @@ enum OllamaCommandService {
           ACTION: DONE
           MESSAGE: <one concise sentence summarizing the result or next manual step>
         - Do not use markdown fences or bullet lists.
+        \(diagnosticGuidance)
 
         Context:
         \(context.contextBlock)
@@ -1277,6 +1281,17 @@ enum OllamaCommandService {
         guard trimmed.count > limit else { return trimmed }
         let start = trimmed.index(trimmed.endIndex, offsetBy: -limit)
         return String(trimmed[start...])
+    }
+
+    private static func buildDiagnosticGuidance(goal: String, scope: GoalScope) -> String {
+        guard InlineAgentCompletionHeuristics.requiresInterpretation(intent: goal, scope: scope) else {
+            return "- If the goal is clearly satisfied after one command, you may respond with ACTION: DONE."
+        }
+
+        return """
+        - This is a diagnostic or troubleshooting goal. Do not stop after one observational command unless the output already supports a concrete conclusion.
+        - When you respond with ACTION: DONE, MESSAGE must explain the conclusion in plain English instead of merely restating command output.
+        """
     }
 
     private static func terminalObservationBlock(_ terminalObservation: String?) -> String {

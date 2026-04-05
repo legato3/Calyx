@@ -21,6 +21,66 @@ private let shellPromptSuffixes: [String] = [
     "$", "%", "❯", "➜", "#",
 ]
 
+enum InlineAgentCompletionHeuristics {
+    private static let interpretationKeywords: [String] = [
+        "troubleshoot", "diagnose", "debug", "check for issues", "issue", "issues",
+        "problem", "problems", "wrong", "health", "slow", "slowness",
+        "performance", "failing", "failure", "why is", "why does", "what's wrong",
+        "what is wrong", "investigate",
+    ]
+
+    @MainActor
+    static func shouldShortCircuitFirstSuccess(
+        intent: String,
+        session: AgentSession,
+        block: TerminalCommandBlock
+    ) -> Bool {
+        guard block.exitCode == 0 else { return false }
+        guard let snippet = block.primarySnippet,
+              !snippet.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return false }
+
+        let commandCount = session.inlineSteps.filter { $0.kind == .command }.count
+        guard commandCount == 1 else { return false }
+
+        let scope = IntentRouter.inferScope(intent)
+        let category = IntentRouter.classify(intent, scope: scope).category
+        switch category {
+        case .fixError, .runWorkflow, .delegateToPeer, .browserResearch:
+            return false
+        case .explain, .generateCommand, .executeCommand, .inspectRepo:
+            break
+        }
+
+        if requiresInterpretation(intent: intent, scope: scope) {
+            return false
+        }
+
+        let words = intent.split(whereSeparator: { $0.isWhitespace }).count
+        return words <= 8
+    }
+
+    static func requiresInterpretation(intent: String, scope: GoalScope) -> Bool {
+        let lower = intent.lowercased()
+        if interpretationKeywords.contains(where: { lower.contains($0) }) {
+            return true
+        }
+
+        if scope == .system {
+            let systemTerms = [
+                "my mac", "this mac", "my machine", "this machine", "cpu", "memory",
+                "ram", "disk", "storage", "battery", "wifi", "network", "bluetooth",
+            ]
+            if systemTerms.contains(where: { lower.contains($0) }) &&
+                (lower.contains("check") || lower.contains("inspect") || lower.contains("investigate")) {
+                return true
+            }
+        }
+
+        return false
+    }
+}
+
 @MainActor
 final class ComposeOverlayController {
     private static let maxAgentIterations = 8
@@ -318,22 +378,11 @@ final class ComposeOverlayController {
         session: AgentSession,
         block: TerminalCommandBlock
     ) -> Bool {
-        guard block.exitCode == 0 else { return false }
-        guard let snippet = block.primarySnippet,
-              !snippet.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else { return false }
-
-        // Only short-circuit on the first completed command of the session.
-        let commandCount = session.inlineSteps.filter { $0.kind == .command }.count
-        guard commandCount == 1 else { return false }
-
-        // Keep this conservative: only for short goals where a single command
-        // is very likely to be the whole answer (e.g. "what is the time",
-        // "show branch", "list files").
-        let words = session.intent
-            .split(whereSeparator: { $0.isWhitespace })
-            .count
-        return words <= 8
+        InlineAgentCompletionHeuristics.shouldShortCircuitFirstSuccess(
+            intent: session.intent,
+            session: session,
+            block: block
+        )
     }
 
     private func summaryText(forFirstSuccess block: TerminalCommandBlock) -> String {
