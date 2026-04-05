@@ -1498,6 +1498,7 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
 
         // Active AI: fire engines on the active tab's finished block
         if tab.id == activeTab?.id, let block = tab.commandBlock(id: commandBlockID) {
+            activeAIEngine.recentBlocks = tab.commandBlocks
             activeAIEngine.onBlockFinished(block, pwd: tab.pwd)
             if block.status == .failed {
                 suggestedDiffEngine.onBlockFailed(block, pwd: tab.pwd)
