@@ -24,6 +24,7 @@ struct AgentSessionSnapshot: Codable, Equatable, Sendable {
     let pendingMessage: String?
     let inlineIteration: Int
     let inlineSteps: [InlineAgentStep]
+    let triggeredBy: String?
 }
 
 extension AgentBackend {
@@ -65,7 +66,8 @@ extension AgentSession {
             pendingMessage: pendingMessage,
             inlineIteration: inlineIteration,
             // Cap to prevent runaway growth — 50 steps is plenty of context
-            inlineSteps: Array(inlineSteps.prefix(50))
+            inlineSteps: Array(inlineSteps.prefix(50)),
+            triggeredBy: triggeredBy
         )
     }
 
@@ -77,6 +79,7 @@ extension AgentSession {
             tabID: snapshot.tabID,
             kind: snapshot.kind,
             backend: AgentBackend(rawSerialized: snapshot.backendRaw, peerName: snapshot.peerName),
+            triggeredBy: snapshot.triggeredBy,
             startedAt: snapshot.startedAt
         )
         self.summary = snapshot.summary

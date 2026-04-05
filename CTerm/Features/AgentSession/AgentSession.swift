@@ -25,6 +25,11 @@ final class AgentSession: Identifiable {
     let kind: AgentSessionKind
     let backend: AgentBackend
     let startedAt: Date
+    /// Optional provenance: name of the trigger rule that caused this session
+    /// to spawn. Nil for user-driven sessions. Displayed in the run panel
+    /// header and activity-strip chips so the user can always answer
+    /// "what caused this to start?".
+    let triggeredBy: String?
 
     // MARK: - State (mutable, observable)
 
@@ -122,11 +127,13 @@ final class AgentSession: Identifiable {
         tabID: UUID?,
         kind: AgentSessionKind,
         backend: AgentBackend,
+        triggeredBy: String? = nil,
         startedAt: Date = Date()
     ) {
         self.id = id
         self.intent = intent
         self.rawPrompt = rawPrompt
+        self.triggeredBy = triggeredBy
         self.tabID = tabID
         self.kind = kind
         self.backend = backend

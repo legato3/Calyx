@@ -26,6 +26,7 @@ enum AuditEventType: String, Codable, Sendable, CaseIterable {
     case browserStepStarted = "browserStepStarted"
     case browserStepCompleted = "browserStepCompleted"
     case browserFindingCaptured = "browserFindingCaptured"
+    case triggerFired       = "triggerFired"
 
     var displayName: String {
         switch self {
@@ -41,6 +42,7 @@ enum AuditEventType: String, Codable, Sendable, CaseIterable {
         case .browserStepStarted:    return "Browser step"
         case .browserStepCompleted:  return "Browser done"
         case .browserFindingCaptured: return "Browser finding"
+        case .triggerFired:          return "Trigger"
         }
     }
 
@@ -58,6 +60,7 @@ enum AuditEventType: String, Codable, Sendable, CaseIterable {
         case .browserStepStarted:    return "globe"
         case .browserStepCompleted:  return "globe.badge.chevron.backward"
         case .browserFindingCaptured: return "doc.text.magnifyingglass"
+        case .triggerFired:          return "bolt.fill"
         }
     }
 
@@ -75,6 +78,7 @@ enum AuditEventType: String, Codable, Sendable, CaseIterable {
         case .browserStepStarted:    return "blue"
         case .browserStepCompleted:  return "teal"
         case .browserFindingCaptured: return "cyan"
+        case .triggerFired:          return "yellow"
         }
     }
 
@@ -86,7 +90,7 @@ enum AuditEventType: String, Codable, Sendable, CaseIterable {
         case .memoryWritten, .memoryDeleted: return .memory
         case .testRunCompleted:             return .tests
         case .browserStepStarted, .browserStepCompleted, .browserFindingCaptured: return .browser
-        case .peerConnected, .taskCompleted, .checkpointCreated, .agentPhaseChanged: return .events
+        case .peerConnected, .taskCompleted, .checkpointCreated, .agentPhaseChanged, .triggerFired: return .events
         }
     }
 }

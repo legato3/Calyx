@@ -31,6 +31,8 @@ struct AgentSessionRequest {
     let enrichContext: Bool
     /// Optional pre-computed enriched prompt. When set, enrichContext is ignored.
     let preEnrichedPrompt: String?
+    /// Optional name of the trigger rule that spawned this session.
+    let triggeredBy: String?
 
     init(
         intent: String,
@@ -39,7 +41,8 @@ struct AgentSessionRequest {
         tabID: UUID? = nil,
         pwd: String? = nil,
         enrichContext: Bool = false,
-        preEnrichedPrompt: String? = nil
+        preEnrichedPrompt: String? = nil,
+        triggeredBy: String? = nil
     ) {
         self.intent = intent
         self.kind = kind
@@ -48,6 +51,7 @@ struct AgentSessionRequest {
         self.pwd = pwd
         self.enrichContext = enrichContext
         self.preEnrichedPrompt = preEnrichedPrompt
+        self.triggeredBy = triggeredBy
     }
 }
 
@@ -80,7 +84,8 @@ final class AgentSessionRouter {
             rawPrompt: raw,
             tabID: request.tabID,
             kind: request.kind,
-            backend: request.backend
+            backend: request.backend,
+            triggeredBy: request.triggeredBy
         )
         registry.register(session)
         logger.info("AgentSessionRouter: started \(request.kind.rawValue) session \(session.id.uuidString.prefix(8)) — \(request.intent.prefix(60))")

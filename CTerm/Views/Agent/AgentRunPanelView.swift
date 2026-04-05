@@ -65,6 +65,19 @@ struct AgentRunPanelView: View {
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .lineLimit(1)
                 .truncationMode(.tail)
+            if let rule = session.triggeredBy {
+                HStack(spacing: 2) {
+                    Image(systemName: "bolt.fill").font(.system(size: 8))
+                    Text(rule)
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.yellow)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(Color.yellow.opacity(0.12), in: Capsule())
+                .help("Triggered by rule: \(rule)")
+            }
             Spacer(minLength: 8)
             Button(action: onCollapse) {
                 Image(systemName: "chevron.down")

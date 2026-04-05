@@ -64,6 +64,13 @@ final class AgentSessionRegistry {
         sessions(forTab: tabID).first { !$0.phase.isTerminal }
     }
 
+    // MARK: - Kind-grouped queries
+
+    var inlineSessions: [AgentSession]    { active.filter { $0.kind == .inline } }
+    var multiStepSessions: [AgentSession] { active.filter { $0.kind == .multiStep } }
+    var queuedSessions: [AgentSession]    { active.filter { $0.kind == .queued } }
+    var delegatedSessions: [AgentSession] { active.filter { $0.kind == .delegated } }
+
     // MARK: - Test / reset hook
 
     #if DEBUG

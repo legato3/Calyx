@@ -225,6 +225,12 @@ struct MainContentView: View {
                                     }
                                     .glassEffect(.clear.tint(chromeTint), in: .rect)
                                 }
+
+                                // Global activity strip — every non-terminal
+                                // AgentSession across all tabs/kinds.
+                                AgentActivityStrip(onChipTap: { session in
+                                    handleActivityChipTap(session)
+                                })
                             }
                         }
                     }
@@ -291,6 +297,26 @@ struct MainContentView: View {
                         .ignoresSafeArea()
                 }
             }
+        }
+    }
+
+    // MARK: - Activity Strip
+
+    private func handleActivityChipTap(_ session: AgentSession) {
+        switch session.kind {
+        case .inline, .multiStep:
+            let currentActiveTabID = windowSession.activeGroup?.activeTabID
+            if let tabID = session.tabID,
+               tabID != currentActiveTabID,
+               windowSession.groups.flatMap(\.tabs).contains(where: { $0.id == tabID }) {
+                actions.onTabSelected?(tabID)
+            }
+        case .queued:
+            windowSession.sidebarMode = .taskQueue
+            if !windowSession.showSidebar { windowSession.showSidebar = true }
+        case .delegated:
+            windowSession.sidebarMode = .delegations
+            if !windowSession.showSidebar { windowSession.showSidebar = true }
         }
     }
 }

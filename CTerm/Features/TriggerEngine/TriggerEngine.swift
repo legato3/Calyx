@@ -235,15 +235,31 @@ final class TriggerEngine {
         switch action {
         case .routeToClaude:
             let message = interpolate(rule.actionMessage.isEmpty ? defaultMessage(for: rule.triggerType, context: context) : rule.actionMessage, context: context)
+            // Spawn a real AgentSession tagged with the rule name so the user
+            // can see "⚡ via <rule>" in the run panel + activity strip and
+            // trace back why the action happened.
+            Task { @MainActor in
+                _ = AgentSessionRouter.shared.start(
+                    AgentSessionRequest(
+                        intent: message,
+                        kind: .inline,
+                        backend: .claudeSubscription,
+                        triggeredBy: rule.name
+                    )
+                )
+            }
             TerminalControlBridge.shared.routeToNearestAgentPaneOrActive(text: message)
+            SessionAuditLogger.log(type: .triggerFired, detail: "'\(rule.name)' → route: \(message.prefix(80))")
 
         case .notify:
             let title = interpolate(rule.notifyTitle.isEmpty ? rule.name : rule.notifyTitle, context: context)
             let body  = interpolate(rule.notifyBody.isEmpty  ? defaultMessage(for: rule.triggerType, context: context) : rule.notifyBody, context: context)
             sendNotification(title: title, body: body)
+            SessionAuditLogger.log(type: .triggerFired, detail: "'\(rule.name)' → notify: \(title.prefix(80))")
 
         case .advanceQueue:
             TaskQueueStore.shared.advanceToNext()
+            SessionAuditLogger.log(type: .triggerFired, detail: "'\(rule.name)' → advanceQueue")
 
         case .remember:
             guard !rule.memoryKey.isEmpty else { return }
@@ -252,6 +268,7 @@ final class TriggerEngine {
             let projectKey = AgentMemoryStore.key(for: pwd)
             AgentMemoryStore.shared.remember(projectKey: projectKey, key: rule.memoryKey, value: value, ttlDays: nil)
             NotificationCenter.default.post(name: .agentMemoryChanged, object: nil)
+            SessionAuditLogger.log(type: .triggerFired, detail: "'\(rule.name)' → remember: \(rule.memoryKey)")
         }
     }
 
