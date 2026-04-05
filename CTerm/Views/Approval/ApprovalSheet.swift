@@ -21,6 +21,8 @@ struct ApprovalSheet: View {
 
     @State private var scope: ApprovalScope
     @State private var secureText: String = ""
+    @State private var autoApproveRemaining: Int = 0
+    @State private var autoApproveTimer: Timer? = nil
 
     init(
         context: ApprovalContext,
@@ -73,6 +75,41 @@ struct ApprovalSheet: View {
         }
         .padding(18)
         .frame(width: 440)
+        .onAppear { startAutoApproveIfEligible() }
+        .onDisappear { cancelAutoApprove() }
+    }
+
+    // MARK: - Auto-approve
+
+    /// Low-risk, non-hard-stop approvals tick down a 5s countdown and
+    /// auto-approve. Any user interaction (touching the scope picker,
+    /// moving the mouse over the sheet) cancels the timer.
+    private var isAutoApproveEligible: Bool {
+        hardStop == nil
+            && context.secureInputRequest == nil
+            && context.riskTier == .low
+    }
+
+    private func startAutoApproveIfEligible() {
+        guard isAutoApproveEligible else { return }
+        autoApproveRemaining = 5
+        autoApproveTimer?.invalidate()
+        autoApproveTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            Task { @MainActor in
+                autoApproveRemaining -= 1
+                if autoApproveRemaining <= 0 {
+                    autoApproveTimer?.invalidate()
+                    autoApproveTimer = nil
+                    onResolve(.approved, scope, nil)
+                }
+            }
+        }
+    }
+
+    private func cancelAutoApprove() {
+        autoApproveTimer?.invalidate()
+        autoApproveTimer = nil
+        autoApproveRemaining = 0
     }
 
     // MARK: - Secure-input layout
@@ -183,11 +220,24 @@ struct ApprovalSheet: View {
 
     private var buttons: some View {
         HStack(spacing: 10) {
-            Button("Deny") { onResolve(.denied, .once, nil) }
-                .keyboardShortcut(.cancelAction)
+            Button("Deny") {
+                cancelAutoApprove()
+                onResolve(.denied, .once, nil)
+            }
+            .keyboardShortcut(.cancelAction)
             Spacer()
-            Button("Dismiss") { onDismiss() }
+            if autoApproveRemaining > 0 {
+                Button("Pause (\(autoApproveRemaining)s)") {
+                    cancelAutoApprove()
+                }
+                .buttonStyle(.bordered)
+            }
+            Button("Dismiss") {
+                cancelAutoApprove()
+                onDismiss()
+            }
             Button(hardStop != nil ? "Approve once" : "Approve") {
+                cancelAutoApprove()
                 onResolve(.approved, scope, nil)
             }
             .buttonStyle(.borderedProminent)

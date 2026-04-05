@@ -52,6 +52,16 @@ final class ExecutionCoordinator {
     /// Returns replacement steps for the remaining plan, or nil to continue as-is.
     var onReplanNeeded: ((_ failedStep: AgentPlanStep, _ output: String) async -> [AgentPlanStep]?)?
 
+    /// Callback after a step *succeeds*, asking the LLM whether the remaining
+    /// plan still makes sense given the step's actual output. Returns nil to
+    /// continue as-is, or replacement steps to splice in after the current step.
+    /// Keep this lightweight — it's called on every success.
+    var onAdaptRequested: ((
+        _ completedStep: AgentPlanStep,
+        _ output: String,
+        _ remainingSteps: [AgentPlanStep]
+    ) async -> [AgentPlanStep]?)?
+
     init(session: AgentSession, planStore: AgentPlanStore) {
         self.session = session
         self.planStore = planStore
@@ -133,12 +143,54 @@ final class ExecutionCoordinator {
         } else {
             // Reset replan counter on success
             replanAttempts = 0
-            // Continue to next step after brief pause
+            // Continue to next step after brief pause — but first, give the
+            // LLM a chance to adapt the remaining plan based on what this
+            // step's output revealed. This is the core "smart" feedback loop.
             executionTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.adaptRemainingPlanIfNeeded(
+                    completedStepID: stepID,
+                    output: observation
+                )
                 try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
-                self?.executeNextStep()
+                self.executeNextStep()
             }
         }
+    }
+
+    // MARK: - Adaptive Planning
+
+    /// After a step succeeds, ask the LLM whether the remaining plan is still
+    /// the right move given the actual step output. Splices in replacement
+    /// steps if the model says so. No-op if only 0–1 remaining steps.
+    private func adaptRemainingPlanIfNeeded(completedStepID: UUID, output: String) async {
+        guard let callback = onAdaptRequested,
+              let plan = session.plan,
+              let completedStep = plan.steps.first(where: { $0.id == completedStepID })
+        else { return }
+
+        // Only worth consulting the model if there's a meaningful remaining plan.
+        let remaining = plan.steps.filter { $0.status == .approved || $0.status == .pending }
+        guard remaining.count >= 2 else { return }
+
+        // Invoke callback directly. The LLM call has its own network timeout;
+        // if it's slow, the user sees the run panel waiting, which is fine.
+        let replacement = await callback(completedStep, output, remaining)
+        guard let newSteps = replacement, !newSteps.isEmpty else { return }
+
+        logger.info("ExecutionCoordinator: adapted remaining plan (\(newSteps.count) new steps) after step output")
+
+        // Replace all non-terminal steps (pending/approved) with the new ones.
+        // Keep terminal history (succeeded/failed/skipped) intact.
+        var updated = plan.steps.filter { $0.status.isTerminal }
+        var adapted = newSteps
+        if session.approvalRequirement == .none {
+            for i in adapted.indices {
+                adapted[i].status = .approved
+            }
+        }
+        updated.append(contentsOf: adapted)
+        plan.steps = updated
     }
 
     // MARK: - Replan

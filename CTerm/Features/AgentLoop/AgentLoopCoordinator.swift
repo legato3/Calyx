@@ -190,7 +190,70 @@ final class AgentLoopCoordinator {
             return await Self.generateReplanSteps(failedStep: failedStep, output: output, pwd: pwd)
         }
 
+        coordinator.onAdaptRequested = { completedStep, output, remaining in
+            return await Self.generateAdaptedSteps(
+                goal: session.displayIntent,
+                completedStep: completedStep,
+                output: output,
+                remaining: remaining,
+                pwd: pwd
+            )
+        }
+
         coordinator.start()
+    }
+
+    // MARK: - Adaptive Planning (post-step)
+
+    /// Asks the LLM whether the remaining plan still fits the observed output.
+    /// Returns nil to mean "keep the existing plan"; returns steps to replace
+    /// the pending/approved tail with a new sequence.
+    private static func generateAdaptedSteps(
+        goal: String,
+        completedStep: AgentPlanStep,
+        output: String,
+        remaining: [AgentPlanStep],
+        pwd: String?
+    ) async -> [AgentPlanStep]? {
+        let remainingLines = remaining
+            .map { "- \($0.title)\($0.command.map { " | CMD: \($0)" } ?? "")" }
+            .joined(separator: "\n")
+
+        let prompt = """
+        You are adapting an agent plan mid-execution based on a step's actual output.
+
+        Original goal: \(goal)
+
+        Step just completed: \(completedStep.title)
+        Command: \(completedStep.command ?? "(none)")
+        Output (truncated):
+        \(output.prefix(1200))
+
+        Remaining plan:
+        \(remainingLines)
+
+        Decide: is the remaining plan still the right path?
+        - If YES, respond with exactly: KEEP
+        - If NO, respond with replacement steps, one per line:
+          STEP: <title> | CMD: <shell command or empty>
+
+        Only propose replacement when the output genuinely changes the plan
+        (e.g. the step revealed a different root cause, skipped work, or an
+        unexpected state). Prefer KEEP when in doubt.
+
+        Decision:
+        """
+
+        do {
+            let response = try await OllamaCommandService.generateCommand(for: prompt, pwd: pwd)
+            let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.uppercased().hasPrefix("KEEP") { return nil }
+            let steps = parseReplanResponse(trimmed)
+            return steps.isEmpty ? nil : steps
+        } catch {
+            logger.debug("AgentLoop: adaptive step generation failed: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     // MARK: - Replan

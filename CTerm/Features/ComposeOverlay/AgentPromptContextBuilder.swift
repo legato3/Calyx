@@ -9,6 +9,8 @@ import Foundation
 @MainActor
 enum AgentPromptContextBuilder {
     private static let maxCommandSnippetLength = 1_200
+    /// Budget for the live terminal viewport block (~800 tokens @ ~4 chars/token).
+    private static let maxViewportLength = 3_200
 
     static func buildPrompt(goal: String, activeTab: Tab?, scope: GoalScope? = nil) -> String {
         // Resolve any `@block:<shortID>` tokens the user typed directly and
@@ -73,6 +75,13 @@ enum AgentPromptContextBuilder {
             sections.append(shellError)
         }
 
+        // Live terminal viewport — what the user can actually see right now.
+        // This is the single biggest lever for "smart" agent behavior: the
+        // model gets to read the same error/output the user is looking at.
+        if let viewport = terminalViewportSection(for: activeTab) {
+            sections.append(viewport)
+        }
+
         let unionIDs = activeTab.attachedBlockIDs.union(extraBlockIDs)
         if let attachedBlocks = attachedBlocksSection(for: activeTab, blockIDs: unionIDs) {
             sections.append(attachedBlocks)
@@ -129,6 +138,31 @@ enum AgentPromptContextBuilder {
         <previous_session_handoff>
         \(handoff.value)
         </previous_session_handoff>
+        """
+    }
+
+    private static func terminalViewportSection(for tab: Tab) -> String? {
+        guard let raw = TerminalControlBridge.shared.delegate?.readViewportText(
+            tabID: tab.id,
+            paneID: nil
+        ) else { return nil }
+
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        // Keep the tail (most recent lines) — that's what the user is looking at.
+        let body: String
+        if trimmed.count > maxViewportLength {
+            let tail = String(trimmed.suffix(maxViewportLength))
+            body = "[...truncated earlier output]\n" + tail
+        } else {
+            body = trimmed
+        }
+
+        return """
+        <current_terminal_viewport>
+        \(body)
+        </current_terminal_viewport>
         """
     }
 
