@@ -174,6 +174,30 @@ final class TaskQueueStore {
         engine.completeRunning(result: result)
     }
 
+    // MARK: - Bridge to ManagedTask system
+
+    /// Convert a QueuedTask to a ManagedTask for the new execution coordinator.
+    func asManagedTask(_ task: QueuedTask) -> ManagedTask {
+        ManagedTask(
+            prompt: task.prompt,
+            priority: .normal,
+            executionMode: .foreground,
+            model: task.model,
+            targetPeerName: task.targetPeerName
+        )
+    }
+
+    /// Migrate all pending tasks to a TaskExecutionCoordinator.
+    func migratePendingTo(_ coordinator: TaskExecutionCoordinator) {
+        for task in tasks where task.status == .pending {
+            coordinator.enqueue(
+                prompt: task.prompt,
+                executionMode: .foreground,
+                model: task.model
+            )
+        }
+    }
+
     // MARK: - Engine reference
 
     // Stored outside @Observable tracking to avoid init-accessor restrictions.
