@@ -644,6 +644,16 @@ final class ComposeOverlayController {
                         self.agentSendEnterKey = nil
                         return
                     }
+                    // Loop-guard: if the LLM is proposing a command that was just observed
+                    // successfully, short-circuit to done rather than re-running it.
+                    if self.isRepeatOfJustSucceeded(command: command, in: activeTab.ollamaAgentSession) {
+                        activeTab.completeOllamaAgent(
+                            summary: "Already ran `\(command.trimmingCharacters(in: .whitespacesAndNewlines))` — see output above."
+                        )
+                        self.agentTargetController = nil
+                        self.agentSendEnterKey = nil
+                        return
+                    }
                     // Auto-run if the command is safe and we still have a controller reference.
                     if self.isSafeAutoRunCommand(command, for: activeTab),
                        let controller = self.agentTargetController,
@@ -995,6 +1005,40 @@ final class ComposeOverlayController {
                 return "\(step.kind.title): \(step.text)"
             }
             .joined(separator: "\n\n")
+    }
+
+    /// Returns true when the LLM's proposed command matches the most recent
+    /// command/observation pair in the session and that observation reported
+    /// a successful exit. Used to break trivial replanning loops where the
+    /// model keeps re-proposing a command it just ran.
+    private func isRepeatOfJustSucceeded(command: String, in session: AgentSession?) -> Bool {
+        guard let session else { return false }
+        let proposed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !proposed.isEmpty else { return false }
+
+        // Walk steps in reverse: expect the last observation to correspond to
+        // the most-recently executed command. If that command matches, and the
+        // observation header reports exit 0, treat it as a repeat.
+        var lastObservation: InlineAgentStep?
+        var lastCommand: InlineAgentStep?
+        for step in session.inlineSteps.reversed() {
+            if lastObservation == nil, step.kind == .observation {
+                lastObservation = step
+                continue
+            }
+            if lastObservation != nil, step.kind == .command {
+                lastCommand = step
+                break
+            }
+        }
+        guard let observation = lastObservation,
+              let ranCommand = lastCommand?.command?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !ranCommand.isEmpty
+        else { return false }
+
+        guard proposed == ranCommand else { return false }
+        // Observation text starts with "Command finished with exit N.".
+        return observation.text.contains("exit 0.")
     }
 
     private func observationText(for block: TerminalCommandBlock) -> String {

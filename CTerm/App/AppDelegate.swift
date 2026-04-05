@@ -468,12 +468,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Rehydrate active agent sessions back into the registry BEFORE tabs
         // restore, so tab UI that references session ids finds them immediately.
+        //
+        // IMPORTANT: Session drivers (compose loop task, ExecutionCoordinator,
+        // DelegationCoordinator, TaskQueueStore) are all in-memory and do NOT
+        // persist. Any session snapshotted mid-run therefore has no driver on
+        // relaunch — it would linger in AgentActivityStrip forever. Reap those
+        // zombies by cancelling any restored session still in a non-terminal
+        // phase. Already-terminal sessions (completed/failed/cancelled) are
+        // restored as-is so history queries still work.
         if let sessionSnaps = snapshot.agentSessions {
+            var reaped = 0
             for snap in sessionSnaps {
                 let session = AgentSession(snapshot: snap)
+                if !session.phase.isTerminal {
+                    session.errorMessage = "Abandoned — app was relaunched mid-run."
+                    session.transition(to: .cancelled)
+                    reaped += 1
+                }
                 AgentSessionRegistry.shared.register(session)
             }
-            logger.info("Restored \(sessionSnaps.count) agent session(s)")
+            logger.info("Restored \(sessionSnaps.count) agent session(s); reaped \(reaped) zombie(s)")
         }
 
         for windowSnap in snapshot.windows {

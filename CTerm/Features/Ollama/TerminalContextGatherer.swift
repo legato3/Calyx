@@ -80,7 +80,7 @@ enum TerminalContextGatherer {
 
         let projectType = pwd.flatMap { detectProjectType(at: $0) }
         let activeEnv = buildEnvSummary()
-        let ctermEnv = buildCTermEnvironment(pwd: pwd)
+        let ctermEnv = await MainActor.run { buildCTermEnvironment(pwd: pwd) }
 
         return TerminalContext(
             pwd: pwd,
@@ -96,30 +96,28 @@ enum TerminalContextGatherer {
     // MARK: - CTerm Environment
 
     /// Builds a lightweight CTerm environment snapshot on the main actor.
-    /// Safe to call from background — uses MainActor.assumeIsolated for
-    /// the observable state reads that are always mutated on main.
+    /// Must be called from MainActor — reads @Observable singletons mutated on main.
+    @MainActor
     private static func buildCTermEnvironment(pwd: String?) -> CTermEnvironmentContext? {
-        MainActor.assumeIsolated {
-            let server = CTermMCPServer.shared
-            let browser = BrowserServer.shared
-            let ipcState = IPCAgentState.shared
+        let server = CTermMCPServer.shared
+        let browser = BrowserServer.shared
+        let ipcState = IPCAgentState.shared
 
-            // Find the tab matching this pwd for pane identity
-            let delegate = TerminalControlBridge.shared.delegate
-            let session = delegate?.terminalWindowSession
-            let matchingTab = session?.groups.flatMap(\.tabs)
-                .first(where: { $0.pwd == pwd })
+        // Find the tab matching this pwd for pane identity
+        let delegate = TerminalControlBridge.shared.delegate
+        let session = delegate?.terminalWindowSession
+        let matchingTab = session?.groups.flatMap(\.tabs)
+            .first(where: { $0.pwd == pwd })
 
-            return CTermEnvironmentContext(
-                tabID: matchingTab?.id.uuidString,
-                tabTitle: matchingTab?.title,
-                paneID: matchingTab.flatMap { $0.splitTree.focusedLeafID?.uuidString },
-                splitPaneCount: matchingTab?.splitTree.allLeafIDs().count ?? 1,
-                activePeerCount: ipcState.activePeerCount,
-                browserAvailable: browser.isRunning,
-                mcpPort: server.isRunning ? server.port : nil
-            )
-        }
+        return CTermEnvironmentContext(
+            tabID: matchingTab?.id.uuidString,
+            tabTitle: matchingTab?.title,
+            paneID: matchingTab.flatMap { $0.splitTree.focusedLeafID?.uuidString },
+            splitPaneCount: matchingTab?.splitTree.allLeafIDs().count ?? 1,
+            activePeerCount: ipcState.activePeerCount,
+            browserAvailable: browser.isRunning,
+            mcpPort: server.isRunning ? server.port : nil
+        )
     }
 
     // MARK: - Git

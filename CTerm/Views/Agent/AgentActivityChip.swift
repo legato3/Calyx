@@ -9,6 +9,7 @@ import SwiftUI
 struct AgentActivityChip: View {
     let session: AgentSession
     var onTap: () -> Void
+    var onCancel: (() -> Void)? = nil
 
     var body: some View {
         Button(action: onTap) {
@@ -50,6 +51,11 @@ struct AgentActivityChip: View {
             )
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if let onCancel {
+                Button("Cancel Session", role: .destructive, action: onCancel)
+            }
+        }
     }
 
     // MARK: - Components

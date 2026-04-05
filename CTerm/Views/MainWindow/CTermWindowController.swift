@@ -1484,12 +1484,19 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
         // Drive shell error detection directly from the exit code.
         shellErrorMonitors[tab.id]?.handleCommandFinished(exitCode: event.exitCode, surface: surface)
 
+        // Only attach the shell-error snippet when THIS command failed. Otherwise
+        // `tab.lastShellError` is a sticky value from a previous failed command and
+        // will leak into successful blocks' `errorSnippet`, poisoning agent observations.
+        let errorSnippet: String? = {
+            guard let exitCode = event.exitCode, exitCode != 0 else { return nil }
+            return tab.lastShellError?.snippet
+        }()
         let commandBlockID = tab.finishCommandBlock(
             surfaceID: event.surfaceView.surfaceController?.id,
             exitCode: event.exitCode,
             durationNanoseconds: event.durationNanoseconds,
             outputSnippet: outputSnippet,
-            errorSnippet: tab.lastShellError?.snippet
+            errorSnippet: errorSnippet
         )
         composeController.handleCommandFinished(
             for: tab,

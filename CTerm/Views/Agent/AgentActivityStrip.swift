@@ -44,11 +44,26 @@ struct AgentActivityStrip: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(sessions) { session in
-                        AgentActivityChip(session: session, onTap: { onChipTap(session) })
+                        AgentActivityChip(
+                            session: session,
+                            onTap: { onChipTap(session) },
+                            onCancel: { cancel(session) }
+                        )
                     }
                 }
                 .padding(.vertical, 4)
             }
+            Button {
+                for session in sessions { cancel(session) }
+            } label: {
+                Image(systemName: "xmark.circle")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Cancel all active sessions")
             Button {
                 setCollapsed(true)
             } label: {
@@ -62,6 +77,11 @@ struct AgentActivityStrip: View {
             .padding(.trailing, 4)
         }
         .background(.ultraThinMaterial)
+    }
+
+    private func cancel(_ session: AgentSession) {
+        session.errorMessage = "Cancelled from activity strip."
+        session.cancel()
     }
 
     private func collapsedPill(count: Int) -> some View {
