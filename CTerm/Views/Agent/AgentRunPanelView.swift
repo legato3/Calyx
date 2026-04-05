@@ -17,6 +17,8 @@ struct AgentRunPanelView: View {
     var onApproveSafe: (() -> Void)? = nil
     var onApproveStep: ((UUID) -> Void)? = nil
     var onSkipStep: ((UUID) -> Void)? = nil
+    var onSaveFinding: ((BrowserFinding) -> Void)? = nil
+    var onSaveAllFindings: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -40,6 +42,10 @@ struct AgentRunPanelView: View {
             } else if session.phase.isTerminal {
                 Divider()
                 summaryBlock
+            }
+            if let research = session.browserResearchSession {
+                Divider()
+                browserResearchBlock(research)
             }
             buttonsRow
         }
@@ -211,6 +217,44 @@ struct AgentRunPanelView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.red)
                     .lineLimit(3)
+            }
+        }
+    }
+
+    // MARK: - Browser research block
+
+    private func browserResearchBlock(_ research: BrowserResearchSession) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            BrowserResearchProgressStrip(session: research)
+            ForEach(research.findings) { finding in
+                BrowserFindingCard(
+                    url: finding.url,
+                    title: finding.title,
+                    preview: finding.preview,
+                    fullContent: finding.content,
+                    isKept: session.keptFindingIDs.contains(finding.id),
+                    onSave: {
+                        onSaveFinding?(finding)
+                    }
+                )
+            }
+            if research.isComplete,
+               !research.findings.isEmpty,
+               !research.findings.allSatisfy({ session.keptFindingIDs.contains($0.id) }) {
+                HStack {
+                    Spacer()
+                    Button {
+                        onSaveAllFindings?()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "tray.and.arrow.down.fill").font(.system(size: 9))
+                            Text("Save all findings to memory").font(.system(size: 10, weight: .medium, design: .rounded))
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .tint(.teal)
+                }
             }
         }
     }

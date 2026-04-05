@@ -37,7 +37,9 @@ struct AgentRunPanelRegion: View {
                         onDismiss: onDismiss,
                         onApproveSafe: { approveSafe(in: session) },
                         onApproveStep: { approveStep(id: $0, in: session) },
-                        onSkipStep: { skipStep(id: $0, in: session) }
+                        onSkipStep: { skipStep(id: $0, in: session) },
+                        onSaveFinding: { saveFinding($0, in: session) },
+                        onSaveAllFindings: { saveAllFindings(in: session) }
                     )
                 }
             } else {
@@ -51,13 +53,12 @@ struct AgentRunPanelRegion: View {
     // MARK: - Selection
 
     /// Only inline compose-driven sessions are controllable from this region.
-    /// Other session kinds still have dedicated sidebars, but the window-level
-    /// actions here only know how to drive `Tab.ollamaAgentSession`.
+    /// Terminal sessions remain visible so the user can review summary +
+    /// browser findings until they explicitly dismiss.
     private var displayedSession: AgentSession? {
         _ = tick  // re-read on timer fire
         guard let tab = activeTab else { return nil }
-        guard let inline = tab.ollamaAgentSession, !inline.phase.isTerminal else { return nil }
-        return inline
+        return tab.ollamaAgentSession
     }
 
     // MARK: - Per-step approval
@@ -94,6 +95,38 @@ struct AgentRunPanelRegion: View {
         if !anyPending && plan.status == .ready {
             plan.status = .executing
         }
+    }
+
+    // MARK: - Browser finding handoff
+
+    private func saveFinding(_ finding: BrowserFinding, in session: AgentSession) {
+        persistFinding(finding, in: session)
+        session.keptFindingIDs.insert(finding.id)
+    }
+
+    private func saveAllFindings(in session: AgentSession) {
+        guard let research = session.browserResearchSession else { return }
+        for finding in research.findings where !session.keptFindingIDs.contains(finding.id) {
+            persistFinding(finding, in: session)
+            session.keptFindingIDs.insert(finding.id)
+        }
+    }
+
+    private func persistFinding(_ finding: BrowserFinding, in session: AgentSession) {
+        let pwd = activeTab?.pwd ?? TerminalControlBridge.shared.delegate?.activeTabPwd
+        guard let pwd else { return }
+        let host = URL(string: finding.url)?.host ?? "unknown"
+        let key = "browser/\(host)/\(finding.title.prefix(40))"
+        AgentMemoryStore.shared.remember(
+            projectKey: AgentMemoryStore.key(for: pwd),
+            key: key,
+            value: String(finding.content.prefix(2000)),
+            ttlDays: 30,
+            category: .projectFact,
+            importance: 0.6,
+            confidence: 0.8,
+            source: .browserResearch
+        )
     }
 
     // MARK: - Timer

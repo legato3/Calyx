@@ -147,6 +147,8 @@ final class BrowserResearchWorkflow {
     ) async -> (findings: [BrowserFinding], summary: String) {
         let session = BrowserResearchSession(goal: goal)
         activeSession = session
+        // Publish to the owning AgentSession so the run panel can bind.
+        agentSession.browserResearchSession = session
 
         logger.info("BrowserResearch: starting workflow — \(goal.prefix(80))")
 
@@ -219,10 +221,15 @@ final class BrowserResearchWorkflow {
                     )
                     session.addFinding(finding)
 
-                    // Record as artifact
+                    // Emit a typed browser-finding artifact so the run panel
+                    // can render it as a card.
                     agentSession.addArtifact(AgentArtifact(
-                        kind: .commandOutput,
-                        value: "Browser finding: \(finding.preview)"
+                        kind: .browserFinding,
+                        value: AgentArtifact.encodeBrowserFinding(
+                            url: finding.url,
+                            title: finding.title,
+                            content: finding.content
+                        )
                     ))
                 }
             }

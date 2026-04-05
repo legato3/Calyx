@@ -29,3 +29,27 @@ struct AgentArtifact: Identifiable, Sendable, Codable {
         self.createdAt = Date()
     }
 }
+
+// MARK: - Browser finding encoding
+
+extension AgentArtifact {
+    static let browserFindingDelimiter = "|||"
+
+    /// Encode a browser finding into a `.browserFinding` artifact value.
+    /// Format: "URL|||TITLE|||PREVIEW" (preview truncated to 500 chars).
+    static func encodeBrowserFinding(url: String, title: String, content: String) -> String {
+        let preview = String(content.prefix(500))
+        return "\(url)\(browserFindingDelimiter)\(title)\(browserFindingDelimiter)\(preview)"
+    }
+
+    /// Decode a `.browserFinding` artifact. Returns nil if kind mismatches or format is malformed.
+    func decodeBrowserFinding() -> (url: String, title: String, preview: String)? {
+        guard kind == .browserFinding else { return nil }
+        let parts = value.components(separatedBy: Self.browserFindingDelimiter)
+        guard parts.count >= 3 else { return nil }
+        let url = parts[0]
+        let title = parts[1]
+        let preview = parts.dropFirst(2).joined(separator: Self.browserFindingDelimiter)
+        return (url, title, preview)
+    }
+}

@@ -466,6 +466,9 @@ final class ExecutionCoordinator {
         executionTask = Task { @MainActor [weak self] in
             guard let self else { return }
 
+            // (workflow.execute publishes its BrowserResearchSession onto
+            //  self.session.browserResearchSession — see BrowserResearchWorkflow)
+
             // Auto-approve all browser steps for the research workflow
             for i in plan.steps.indices {
                 if plan.steps[i].status == .pending,

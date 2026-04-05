@@ -95,6 +95,16 @@ final class AgentSession: Identifiable {
     /// Session-lifetime only, not persisted.
     var isRunPanelCollapsed: Bool = false
 
+    /// Live browser research state (set by ExecutionCoordinator during
+    /// browserResearch workflows). Bound by the run panel to render the
+    /// progress strip + finding cards in real time. Cleared when the
+    /// workflow finishes.
+    var browserResearchSession: BrowserResearchSession?
+
+    /// Findings the user has explicitly kept via the per-card Save button.
+    /// Transient: populated during the session, discarded at session end.
+    var keptFindingIDs: Set<UUID> = []
+
     // MARK: - Observers
 
     private var observers: [WeakObserver] = []
