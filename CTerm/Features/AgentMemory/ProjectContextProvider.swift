@@ -18,6 +18,8 @@ enum ProjectContextProvider {
     private static let totalBudget = 6000
     /// Max characters allocated to CLAUDE.md content.
     private static let claudeMdBudget = 2000
+    /// Max characters allocated to AGENTS.md content.
+    private static let agentsMdBudget = 2000
     /// Max characters allocated to memories.
     private static let memoryBudget = 1500
     /// Max number of memories to include.
@@ -38,6 +40,18 @@ enum ProjectContextProvider {
         // CLAUDE.md — look at git root first, then cwd. Budget-trimmed.
         if let md = readFile(atPath: "\(root)/CLAUDE.md") ?? readFile(atPath: "\(workDir)/CLAUDE.md") {
             ctx["claude_md"] = budgetClaudeMd(md)
+        }
+
+        // AGENTS.md — agent-specific instructions. Priority: .cterm/AGENTS.md at
+        // root, then AGENTS.md at root, then at cwd. Budget-trimmed separately
+        // from CLAUDE.md so both can coexist.
+        let agentsPaths = [
+            "\(root)/.cterm/AGENTS.md",
+            "\(root)/AGENTS.md",
+            "\(workDir)/AGENTS.md",
+        ]
+        if let agents = agentsPaths.lazy.compactMap({ readFile(atPath: $0) }).first {
+            ctx["agents_md"] = budgetMarkdown(agents, limit: agentsMdBudget)
         }
 
         // Git metadata
@@ -163,6 +177,11 @@ enum ProjectContextProvider {
             lines.append("active_peers: \(peers.compactMap { $0["name"] }.joined(separator: ", "))")
         }
 
+        if let agents = ctx["agents_md"] as? String {
+            lines.append("agents_md: |")
+            agents.components(separatedBy: "\n").forEach { lines.append("  \($0)") }
+        }
+
         if let md = ctx["claude_md"] as? String {
             lines.append("claude_md: |")
             md.components(separatedBy: "\n").forEach { lines.append("  \($0)") }
@@ -215,6 +234,13 @@ enum ProjectContextProvider {
         }
 
         return kept.joined(separator: "\n")
+    }
+
+    /// Generic markdown trimmer: keep from the top until we hit the budget.
+    /// Used for AGENTS.md where every section is assumed relevant.
+    private static func budgetMarkdown(_ content: String, limit: Int) -> String {
+        guard content.count > limit else { return content }
+        return String(content.prefix(limit)) + "\n[...truncated]"
     }
 
     /// Format memories for context injection, respecting the memory budget.

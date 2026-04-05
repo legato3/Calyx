@@ -202,6 +202,15 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
         focusManager.focusComposeOverlay = { [weak self] in
             self?.windowActions.onFocusComposeTextField?()
         }
+        // Suppress compose redirect when a TUI owns the focused pane so
+        // keystrokes can reach the TUI instead of being swallowed by compose.
+        focusManager.isComposeFocusSuppressed = { [weak self] in
+            guard let self,
+                  let tab = self.activeTab,
+                  let id = tab.splitTree.focusedLeafID,
+                  let view = tab.registry.view(for: id) else { return false }
+            return view.isTUIActive
+        }
         browserManager.onSaveRequested = { [weak self] in
             self?.requestSave()
         }
@@ -1225,6 +1234,28 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
                            name: .ghosttySizeLimit, object: nil)
         center.addObserver(self, selector: #selector(handleNLModeHashPressed(_:)),
                            name: .nlModeHashPressed, object: nil)
+        center.addObserver(self, selector: #selector(handleSurfaceTUIStateChanged(_:)),
+                           name: .surfaceTUIStateChanged, object: nil)
+        center.addObserver(self, selector: #selector(handleComposeYieldFocusToTerminal(_:)),
+                           name: .composeYieldFocusToTerminal, object: nil)
+    }
+
+    @objc private func handleSurfaceTUIStateChanged(_ notification: Notification) {
+        guard let view = notification.object as? SurfaceView,
+              belongsToThisWindow(view) else { return }
+        guard let tab = activeTab,
+              let id = tab.splitTree.focusedLeafID,
+              let focusedView = tab.registry.view(for: id),
+              focusedView === view else { return }
+        focusManager.focusImmediately(window: window, tab: tab)
+    }
+
+    @objc private func handleComposeYieldFocusToTerminal(_ notification: Notification) {
+        guard window?.isKeyWindow == true,
+              let tab = activeTab,
+              let id = tab.splitTree.focusedLeafID,
+              let view = tab.registry.view(for: id) else { return }
+        view.forceFocus()
     }
 
     // MARK: - Notification Handlers

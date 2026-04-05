@@ -188,6 +188,13 @@ class ComposeOverlayView: NSView {
             onCmdReturn?()
             return true
         }
+        // Cmd+Shift+Down — yield keyboard focus to the focused terminal pane
+        // (escape hatch for when a TUI runs inside the pane, e.g. claude CLI).
+        if event.modifierFlags.contains([.command, .shift]),
+           event.keyCode == 125 {
+            NotificationCenter.default.post(name: .composeYieldFocusToTerminal, object: nil)
+            return true
+        }
         return super.performKeyEquivalent(with: event)
     }
 

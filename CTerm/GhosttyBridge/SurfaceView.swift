@@ -118,9 +118,27 @@ class SurfaceView: NSView {
     /// input flows through the bottom compose bar (Warp-style single input).
     var warpInputMode: Bool = false
 
+    /// True when the surface is running a TUI (alt-screen / mouse reporting).
+    /// Inferred from `surfaceController.mouseCaptured`; updated by
+    /// `checkScrollbarStateTransitions`. Used by `FocusManager` to suppress the
+    /// compose redirect so keystrokes reach the TUI.
+    var isTUIActive: Bool { lastMouseCapturedState }
+
+    /// Transient flag set by `forceFocus()` to bypass Warp-mode refusal for a
+    /// single `makeFirstResponder` call.
+    private var focusForceOverride: Bool = false
+
     // MARK: - NSView Overrides
 
-    override var acceptsFirstResponder: Bool { !warpInputMode }
+    override var acceptsFirstResponder: Bool { !warpInputMode || isTUIActive || focusForceOverride }
+
+    /// Synchronously claim first-responder, overriding Warp-mode refusal.
+    /// Used by the compose overlay's yield-to-terminal keybinding.
+    func forceFocus() {
+        focusForceOverride = true
+        defer { focusForceOverride = false }
+        _ = window?.makeFirstResponder(self)
+    }
     override var wantsUpdateLayer: Bool { true }
     override var isOpaque: Bool { false }
 
@@ -1076,6 +1094,15 @@ class SurfaceView: NSView {
         if currentCaptured && !lastMouseCapturedState {
             resetSmoothScrollOffset()
         }
+        if currentCaptured != lastMouseCapturedState {
+            // TUI entered/exited alt-screen (proxied via mouse reporting).
+            // Notify so FocusManager can yield compose focus to the terminal.
+            NotificationCenter.default.post(
+                name: .surfaceTUIStateChanged,
+                object: self,
+                userInfo: ["tuiActive": currentCaptured]
+            )
+        }
         lastMouseCapturedState = currentCaptured
 
         let currentHasScrollback: Bool
@@ -1286,4 +1313,13 @@ extension SurfaceView {
     @IBAction func performFindAction(_ sender: Any?) {
         surfaceController?.performAction("start_search")
     }
+}
+
+extension Notification.Name {
+    /// Posted when a `SurfaceView` transitions into or out of TUI mode
+    /// (inferred from mouse capture). userInfo["tuiActive"]: Bool.
+    static let surfaceTUIStateChanged = Notification.Name("com.cterm.surface.tuiStateChanged")
+    /// Posted by the compose overlay when the user yields keyboard focus
+    /// back to the focused terminal surface (Cmd+Shift+Down).
+    static let composeYieldFocusToTerminal = Notification.Name("com.cterm.compose.yieldFocusToTerminal")
 }

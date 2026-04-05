@@ -22,13 +22,19 @@ final class FocusManager {
     /// Used in Warp-mode to keep focus in the compose bar.
     var focusComposeOverlay: (() -> Void)?
 
+    /// When set and returns true, the compose redirect is skipped and focus
+    /// falls through to the terminal surface (used when a TUI owns the pane).
+    var isComposeFocusSuppressed: (() -> Bool)?
+
     // MARK: - Public API
 
     /// Schedules an async focus-restore cycle. Call after every tab switch or split.
     func restoreFocus(window: NSWindow?, tab: Tab?, splitContainerView: SplitContainerView?) {
         // In Warp mode, keep keyboard focus in the compose bar, but preserve
         // the active terminal surface's focused appearance while the window is key.
-        if let focusComposeOverlay {
+        // Skip the redirect when a TUI owns the focused pane — it needs the keys.
+        let suppressed = isComposeFocusSuppressed?() ?? false
+        if let focusComposeOverlay, !suppressed {
             focusComposeOverlay()
             applyVisualFocus(window: window, tab: tab)
             return
@@ -52,7 +58,9 @@ final class FocusManager {
     func focusImmediately(window: NSWindow?, tab: Tab?) -> Bool {
         // In Warp mode, keep keyboard focus in the compose bar, but preserve
         // the active terminal surface's focused appearance while the window is key.
-        if let focusComposeOverlay {
+        // Skip the redirect when a TUI owns the focused pane — it needs the keys.
+        let suppressed = isComposeFocusSuppressed?() ?? false
+        if let focusComposeOverlay, !suppressed {
             focusComposeOverlay()
             return applyVisualFocus(window: window, tab: tab)
         }
